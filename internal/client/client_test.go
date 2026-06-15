@@ -1,0 +1,174 @@
+package client
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+
+	"main/internal/echonet"
+)
+
+// fakeTransport は送信フレームを responder に渡し、その戻りを Recv で返す。
+type fakeTransport struct {
+	responder func(echonet.Frame) []echonet.Frame // 送信に対する応答フレーム群(空可)
+	recvCh    chan []byte
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func newFakeTransport(responder func(echonet.Frame) []echonet.Frame) *fakeTransport {
+	return &fakeTransport{
+		responder: responder,
+		recvCh:    make(chan []byte, 16),
+		closed:    make(chan struct{}),
+	}
+}
+
+func (f *fakeTransport) Send(_ context.Context, payload []byte) error {
+	frame, err := echonet.Decode(payload)
+	if err != nil {
+		return err
+	}
+	if f.responder != nil {
+		for _, r := range f.responder(frame) {
+			f.recvCh <- r.Encode()
+		}
+	}
+	return nil
+}
+
+func (f *fakeTransport) Recv(ctx context.Context) ([]byte, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-f.closed:
+		return nil, io.EOF
+	case b := <-f.recvCh:
+		return b, nil
+	}
+}
+
+func (f *fakeTransport) Close() error {
+	f.closeOnce.Do(func() { close(f.closed) })
+	return nil
+}
+
+// inject は外部(メータ)発の非同期フレームを注入する。
+func (f *fakeTransport) inject(fr echonet.Frame) { f.recvCh <- fr.Encode() }
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestGetCorrelatesByTID(t *testing.T) {
+	tr := newFakeTransport(func(req echonet.Frame) []echonet.Frame {
+		// 同一 TID で Get_Res を返す。
+		return []echonet.Frame{{
+			TID: req.TID, SEOJ: echonet.EOJMeter, DEOJ: echonet.EOJController,
+			ESV:   echonet.ESVGetRes,
+			Props: []echonet.Property{{EPC: echonet.EPCInstantPower, EDT: []byte{0, 0, 2, 0}}},
+		}}
+	})
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+
+	gctx, gcancel := context.WithTimeout(ctx, time.Second)
+	defer gcancel()
+	resp, err := c.Get(gctx, echonet.EPCInstantPower)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if resp.ESV != echonet.ESVGetRes || len(resp.Props) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetTimeout(t *testing.T) {
+	tr := newFakeTransport(func(echonet.Frame) []echonet.Frame { return nil }) // 応答しない
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+
+	gctx, gcancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer gcancel()
+	if _, err := c.Get(gctx, echonet.EPCInstantPower); err == nil {
+		t.Fatal("expected timeout error")
+	}
+	// タイムアウト後 pending は掃除されていること。
+	c.mu.Lock()
+	n := len(c.pending)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("pending not cleaned: %d", n)
+	}
+}
+
+func TestSNAReturnsError(t *testing.T) {
+	tr := newFakeTransport(func(req echonet.Frame) []echonet.Frame {
+		return []echonet.Frame{{
+			TID: req.TID, SEOJ: echonet.EOJMeter, DEOJ: echonet.EOJController,
+			ESV:   echonet.ESVGetSNA,
+			Props: []echonet.Property{{EPC: echonet.EPCInstantPower}},
+		}}
+	})
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+	gctx, gcancel := context.WithTimeout(ctx, time.Second)
+	defer gcancel()
+	if _, err := c.Get(gctx, echonet.EPCInstantPower); err == nil {
+		t.Fatal("expected SNA error")
+	}
+}
+
+func TestINFCSendsResponseAndNotifies(t *testing.T) {
+	var mu sync.Mutex
+	var sawINFCRes bool
+	tr := newFakeTransport(func(req echonet.Frame) []echonet.Frame {
+		if req.ESV == echonet.ESVINFCRes {
+			mu.Lock()
+			sawINFCRes = true
+			mu.Unlock()
+		}
+		return nil
+	})
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+
+	// メータからの INFC を注入。
+	tr.inject(echonet.Frame{
+		TID: 0x9999, SEOJ: echonet.EOJMeter, DEOJ: echonet.EOJController,
+		ESV:   echonet.ESVINFC,
+		Props: []echonet.Property{{EPC: echonet.EPCFaultStatus, EDT: []byte{0x42}}},
+	})
+
+	select {
+	case f := <-c.INF():
+		if f.ESV != echonet.ESVINFC {
+			t.Fatalf("want INFC on stream, got %#x", byte(f.ESV))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no INF notification received")
+	}
+
+	// INFC_Res が送られたか(少し待つ)。
+	deadline := time.After(time.Second)
+	for {
+		mu.Lock()
+		ok := sawINFCRes
+		mu.Unlock()
+		if ok {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("INFC_Res was not sent")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
