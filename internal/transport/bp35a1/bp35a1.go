@@ -24,25 +24,61 @@ const defaultBaud = 115200
 var candidateBauds = []int{115200, 2400, 4800, 9600, 19200, 38400, 57600}
 
 const (
-	cmdSKSREG    = "SKSREG"
-	cmdSKSCAN    = "SKSCAN"
-	cmdSKLL64    = "SKLL64"
-	cmdSKJOIN    = "SKJOIN"
-	cmdSKSENDTO  = "SKSENDTO"
-	cmdSKSETRBID = "SKSETRBID"
-	cmdSKSETPWD  = "SKSETPWD"
-	cmdSKVER     = "SKVER"
-	cmdSKRESET   = "SKRESET"
-	cmdROPT      = "ROPT"
-	cmdWOPT      = "WOPT"
+	cmdSKSREG    = "SKSREG"    // 3.1
+	cmdSKSCAN    = "SKSCAN"    // 3.9
+	cmdSKLL64    = "SKLL64"    // 3.29
+	cmdSKJOIN    = "SKJOIN"    // 3.4
+	cmdSKSENDTO  = "SKSENDTO"  // 3.7
+	cmdSKSETRBID = "SKSETRBID" // 3.17
+	cmdSKSETPWD  = "SKSETPWD"  // 3.16
+	cmdSKVER     = "SKVER"     // 3.23
+	cmdSKRESET   = "SKRESET"   // 3.25
+	cmdWOPT      = "WOPT"      // 3.30
+	cmdROPT      = "ROPT"      // 3.31
+	cmdWUART     = "WUART"     // 3.32
+	cmdRUART     = "RUART"     // 3.33
 )
 
 const (
+	crlf = "\r\n"
+	cr   = "\r"
+)
+
+const (
+	evNSReceived     = 0x01
+	evNAReceived     = 0x02
+	evEchoRequest    = 0x05
+	evEDScanDone     = 0x1F
+	evBeaconReceived = 0x20
+	evUDPSendDone    = 0x21
 	evActiveScanOK   = 0x22
 	evPANAConnectErr = 0x24
 	evPANAConnectOK  = 0x25
+	evSessionEnd     = 0x26
+	evSessionEndOK   = 0x27
+	evSessionEndTO   = 0x28
 	evLifetimeExpire = 0x29
+	evTxLimitOn      = 0x32
+	evTxLimitOff     = 0x33
 )
+
+var eventName = map[int]string{
+	evNSReceived:     "NS received",
+	evNAReceived:     "NA received",
+	evEchoRequest:    "Echo Request received",
+	evEDScanDone:     "ED scan completed",
+	evBeaconReceived: "Beacon received",
+	evUDPSendDone:    "UDP send completed",
+	evActiveScanOK:   "active scan completed",
+	evPANAConnectErr: "PANA connection failed",
+	evPANAConnectOK:  "PANA connection established",
+	evSessionEnd:     "session end requested by peer",
+	evSessionEndOK:   "session end succeeded",
+	evSessionEndTO:   "session end timed out",
+	evLifetimeExpire: "session lifetime expired",
+	evTxLimitOn:      "ARIB transmit-time limit engaged",
+	evTxLimitOff:     "ARIB transmit-time limit released",
+}
 
 var (
 	ErrTxProhibited = errors.New("bp35a1: UDP transmit prohibited (no PANA session)")
@@ -105,9 +141,6 @@ type Device struct {
 	txAllowed  atomic.Bool
 	ip         atomic.Value // string
 
-	// reconnect は manage が PANA セッション期限切れを検知した際に呼ぶ。
-	// 既定では reestablish。テストで差し替え可能。
-	// 戻り値: 次回以降に使う EPAN と、監視を継続するかどうか。
 	reconnect func(Epan) (Epan, bool)
 
 	closeOnce sync.Once
@@ -149,7 +182,7 @@ func Open(ctx context.Context, opts Options) (*Device, error) {
 		log:       opts.Logger,
 		ctx:       dctx,
 		cancel:    cancel,
-		newline:   "\r\n",
+		newline:   crlf,
 		state:     stateNormal,
 		epanCache: opts.EpanCache,
 		results:   make(chan string, 8),
@@ -310,8 +343,8 @@ func (d *Device) correctBaudrate(ctx context.Context, preferred int) error {
 			d.log.Debug("testing baudrate", "baud", b)
 
 			d.clearBuffer()
-			d.traceSerial("tx", []byte("\r\n"))
-			_, _ = d.port.Write([]byte("\r\n"))
+			d.traceSerial("tx", []byte(crlf))
+			_, _ = d.port.Write([]byte(crlf))
 			_ = d.port.ResetInputBuffer()
 			_ = d.port.ResetOutputBuffer()
 

@@ -2,6 +2,7 @@ package bp35a1
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -160,6 +161,12 @@ func (d *Device) handleEvent(line string) {
 	if err != nil {
 		return
 	}
+	name := eventName[int(code)]
+	if name == "" {
+		name = "unknown"
+	}
+	d.log.Debug("EVENT", "code", fmt.Sprintf("0x%02X", code), "name", name, "sender", f[2])
+
 	switch int(code) {
 	case evPANAConnectOK:
 		d.sessionEst.Store(true)

@@ -21,11 +21,11 @@ func (d *Device) exec(ctx context.Context, cmd string, params []string, data []b
 
 	d.drainResponses()
 
-	newline := "\r\n"
+	newline := crlf
 	state := stateNormal
 	switch cmd {
-	case cmdWOPT, cmdROPT:
-		newline = "\r"
+	case cmdROPT, cmdWOPT, cmdRUART, cmdWUART:
+		newline = cr
 		if cmd == cmdROPT {
 			state = stateProductRead
 		}
@@ -93,7 +93,7 @@ func (d *Device) collectResponses() string {
 		case r := <-d.responses:
 			lines = append(lines, r)
 		default:
-			return strings.Join(lines, "\r\n")
+			return strings.Join(lines, crlf)
 		}
 	}
 }
