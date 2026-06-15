@@ -39,16 +39,16 @@ func (c *Collector) pollPower(ctx context.Context) error {
 	return c.out.WritePower(ctx, p)
 }
 
-// 積算現在値(0xE0)と 1分積算(0xD0 正方向)を取得して書き込む。
-// 一部メータは複数EPCを1要求にまとめると応答しない(SNA で一部を空返し or 無応答)
-// ため、E0 と D0 を別々の Get に分割する。
 func (c *Collector) pollEnergyMinute(ctx context.Context) error {
 	params := c.loadParams()
-	return errors.Join(
-		c.pollEnergyTotal(ctx, params),
-		// 0xD0(1分積算)は本メータが未実装のため無効化。
-		// c.pollEnergy1Min(ctx, params),
-	)
+	var errs []error
+	if c.supportsEPC(echonet.EPCCumulativeFwd) {
+		errs = append(errs, c.pollEnergyTotal(ctx, params))
+	}
+	if c.supportsEPC(echonet.EPCCumulative1Min) {
+		errs = append(errs, c.pollEnergy1Min(ctx, params))
+	}
+	return errors.Join(errs...)
 }
 
 // 0xE0 積算電力量計測値(正方向)
@@ -72,10 +72,7 @@ func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParam
 	return nil
 }
 
-// 0xD0 1分積算電力量計測値。15byte(年月日+時分秒+正方向4+逆方向4)。
-// 正方向値と埋め込み計測時刻を使う。
-// 本メータは 0xD0 未実装のため pollEnergyMinute からの呼び出しは無効化済み。
-// 対応メータでは有効化して使える。
+// 0xD0 1分積算電力量計測値。正方向値と埋め込み計測時刻を使う。
 func (c *Collector) pollEnergy1Min(ctx context.Context, params model.MeterParams) error {
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
 	defer cancel()
@@ -155,33 +152,35 @@ func (c *Collector) refreshMeta(ctx context.Context) error {
 		c.log.Warn("meter params incomplete", "coefficient", params.Coefficient, "unit_kwh", params.UnitKWh)
 	}
 
-	c.logGetPropertyMap(ctx)
-
 	return c.out.WriteMeta(ctx, meta)
 }
 
-func (c *Collector) logGetPropertyMap(ctx context.Context) {
-	f, err := c.getPartial(ctx, echonet.EPCGetPropertyMap)
+func (c *Collector) fetchPropertyMap(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeoutLong)
+	defer cancel()
+
+	f, err := c.cli.Get(ctx, echonet.EPCGetPropertyMap)
 	if err != nil {
-		c.log.Warn("get property map failed", "err", err)
-		return
+		return fmt.Errorf("get 0x9F: %w", err)
 	}
 	edt, ok := findEDT(f, echonet.EPCGetPropertyMap)
 	if !ok || len(edt) == 0 {
-		c.log.Warn("get property map: 0x9F not returned")
-		return
+		return fmt.Errorf("0x9F not returned")
 	}
 	epcs, err := echonet.DecodePropertyMap(edt)
 	if err != nil {
-		c.log.Warn("get property map decode", "err", err)
-		return
+		return fmt.Errorf("decode 0x9F: %w", err)
 	}
+
+	c.propMap = make(map[byte]struct{}, len(epcs))
+	for _, e := range epcs {
+		c.propMap[e] = struct{}{}
+	}
+
 	list := make([]string, len(epcs))
 	for i, e := range epcs {
 		list[i] = fmt.Sprintf("0x%02X", e)
 	}
-	c.log.Info("GET property map",
-		"count", len(epcs),
-		"epcs", strings.Join(list, ","),
-	)
+	c.log.Info("property map", "count", len(epcs), "epcs", strings.Join(list, ","))
+	return nil
 }

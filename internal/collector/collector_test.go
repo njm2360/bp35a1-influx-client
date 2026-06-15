@@ -13,12 +13,12 @@ import (
 	"main/internal/model"
 )
 
-type fakeSession struct {
+type fakeELClient struct {
 	edt map[byte][]byte
 	inf chan echonet.Frame
 }
 
-func (s *fakeSession) Get(_ context.Context, epcs ...byte) (echonet.Frame, error) {
+func (s *fakeELClient) Get(_ context.Context, epcs ...byte) (echonet.Frame, error) {
 	f := echonet.Frame{ESV: echonet.ESVGetRes}
 	for _, e := range epcs {
 		if v, ok := s.edt[e]; ok {
@@ -28,7 +28,7 @@ func (s *fakeSession) Get(_ context.Context, epcs ...byte) (echonet.Frame, error
 	return f, nil
 }
 
-func (s *fakeSession) INF() <-chan echonet.Frame { return s.inf }
+func (s *fakeELClient) INF() <-chan echonet.Frame { return s.inf }
 
 type fakeWriter struct {
 	mu       sync.Mutex
@@ -86,12 +86,12 @@ func testConfig() config.Config {
 	}
 }
 
-func newTestCollector(s *fakeSession, w *fakeWriter) *Collector {
+func newTestCollector(s *fakeELClient, w *fakeWriter) *Collector {
 	return New(s, w, testConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestPollPower(t *testing.T) {
-	s := &fakeSession{edt: map[byte][]byte{
+	s := &fakeELClient{edt: map[byte][]byte{
 		echonet.EPCInstantPower:   {0x00, 0x00, 0x02, 0x00}, // 512W
 		echonet.EPCInstantCurrent: {0x00, 0x19, 0x7F, 0xFE}, // R=2.5A, T 未計測
 	}}
@@ -110,7 +110,7 @@ func TestPollPower(t *testing.T) {
 }
 
 func TestPollPowerNoData(t *testing.T) {
-	s := &fakeSession{edt: map[byte][]byte{
+	s := &fakeELClient{edt: map[byte][]byte{
 		echonet.EPCInstantPower:   {0x7F, 0xFF, 0xFF, 0xFE}, // no-data
 		echonet.EPCInstantCurrent: {0x00, 0x19, 0x7F, 0xFE}, // R=2.5A, T 未計測
 	}}
@@ -133,9 +133,8 @@ func TestPollPowerNoData(t *testing.T) {
 }
 
 func TestPollEnergyMinuteAppliesParams(t *testing.T) {
-	s := &fakeSession{edt: map[byte][]byte{
+	s := &fakeELClient{edt: map[byte][]byte{
 		echonet.EPCCumulativeFwd: {0x00, 0x01, 0x86, 0xA0}, // 100000
-		// 0xD0 を返せるメータでも、現在 pollEnergyMinute は D0 を要求しない。
 		echonet.EPCCumulative1Min: {
 			0x07, 0xEA, 0x06, 0x0F, 0x0A, 0x1E, 0x00,
 			0x00, 0x01, 0x86, 0xA0, // 正方向 100000
@@ -145,6 +144,10 @@ func TestPollEnergyMinuteAppliesParams(t *testing.T) {
 	w := &fakeWriter{}
 	c := newTestCollector(s, w)
 	c.params.Store(&model.MeterParams{Coefficient: 1, UnitKWh: 0.1})
+	c.propMap = map[byte]struct{}{
+		echonet.EPCCumulativeFwd:  {},
+		echonet.EPCCumulative1Min: {},
+	}
 
 	if err := c.pollEnergyMinute(context.Background()); err != nil {
 		t.Fatal(err)
@@ -152,16 +155,34 @@ func TestPollEnergyMinuteAppliesParams(t *testing.T) {
 	if len(w.total) != 1 || w.total[0].KWh != 10000 || w.total[0].Raw != 100000 {
 		t.Fatalf("unexpected total: %+v", w.total)
 	}
-	// 0xD0 ジョブは無効化済みなので energy_1min は書かれない。
-	if len(w.min1) != 0 {
-		t.Fatalf("min1 should not be written (D0 disabled), got %d", len(w.min1))
+	if len(w.min1) != 1 || w.min1[0].KWh != 10000 || w.min1[0].Raw != 100000 {
+		t.Fatalf("unexpected min1: %+v", w.min1)
 	}
 }
 
-// pollEnergy1Min は現在 pollEnergyMinute から呼ばれないが、0xD0 対応メータ向けに
-// ロジックは保持する。直接呼び出して換算・時刻処理を検証する。
+func TestPollEnergyMinuteSkipsUnsupported(t *testing.T) {
+	s := &fakeELClient{edt: map[byte][]byte{
+		echonet.EPCCumulativeFwd: {0x00, 0x01, 0x86, 0xA0},
+	}}
+	w := &fakeWriter{}
+	c := newTestCollector(s, w)
+	c.params.Store(&model.MeterParams{Coefficient: 1, UnitKWh: 0.1})
+	c.propMap = map[byte]struct{}{echonet.EPCCumulativeFwd: {}}
+
+	if err := c.pollEnergyMinute(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.total) != 1 {
+		t.Fatalf("want 1 total write, got %d", len(w.total))
+	}
+	if len(w.min1) != 0 {
+		t.Fatalf("min1 should be skipped (D0 not in propMap), got %d", len(w.min1))
+	}
+}
+
+// pollEnergy1Min 単体の換算・時刻処理を検証する。
 func TestPollEnergy1Min(t *testing.T) {
-	s := &fakeSession{edt: map[byte][]byte{
+	s := &fakeELClient{edt: map[byte][]byte{
 		// 0xD0 は 15byte: 年月日+時分秒+正方向(100000)+逆方向
 		echonet.EPCCumulative1Min: {
 			0x07, 0xEA, 0x06, 0x0F, 0x0A, 0x1E, 0x00,
@@ -187,12 +208,13 @@ func TestPollEnergy1Min(t *testing.T) {
 }
 
 func TestEnergyNoDataSkipped(t *testing.T) {
-	s := &fakeSession{edt: map[byte][]byte{
+	s := &fakeELClient{edt: map[byte][]byte{
 		echonet.EPCCumulativeFwd: {0xFF, 0xFF, 0xFF, 0xFE}, // noData
 	}}
 	w := &fakeWriter{}
 	c := newTestCollector(s, w)
 	c.params.Store(&model.MeterParams{Coefficient: 1, UnitKWh: 0.1})
+	c.propMap = map[byte]struct{}{echonet.EPCCumulativeFwd: {}}
 	if err := c.pollEnergyMinute(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +224,7 @@ func TestEnergyNoDataSkipped(t *testing.T) {
 }
 
 func TestRefreshMetaSetsParams(t *testing.T) {
-	s := &fakeSession{edt: map[byte][]byte{
+	s := &fakeELClient{edt: map[byte][]byte{
 		echonet.EPCMakerCode:   {0x00, 0x00, 0x16},
 		echonet.EPCCoefficient: {0x00, 0x00, 0x00, 0x01},
 		echonet.EPCUnit:        {0x01}, // 0.1 kWh
@@ -223,7 +245,7 @@ func TestRefreshMetaSetsParams(t *testing.T) {
 }
 
 func TestHandleINFScheduled30(t *testing.T) {
-	s := &fakeSession{}
+	s := &fakeELClient{}
 	w := &fakeWriter{}
 	c := newTestCollector(s, w)
 	c.params.Store(&model.MeterParams{Coefficient: 1, UnitKWh: 0.1})

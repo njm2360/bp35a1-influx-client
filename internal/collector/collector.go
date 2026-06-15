@@ -15,34 +15,52 @@ import (
 	"main/internal/storage"
 )
 
-type Session interface {
+type Client interface {
 	Get(ctx context.Context, epcs ...byte) (echonet.Frame, error)
 	INF() <-chan echonet.Frame
 }
 
 type Collector struct {
-	cli    Session
-	out    storage.Writer
-	cfg    config.Config
-	log    *slog.Logger
-	params atomic.Pointer[model.MeterParams]
+	cli     Client
+	out     storage.Writer
+	cfg     config.Config
+	log     *slog.Logger
+	params  atomic.Pointer[model.MeterParams]
+	propMap map[byte]struct{}
 }
 
-func New(cli Session, out storage.Writer, cfg config.Config, log *slog.Logger) *Collector {
+func (c *Collector) supportsEPC(epc byte) bool {
+	_, ok := c.propMap[epc]
+	return ok
+}
+
+func New(cli Client, out storage.Writer, cfg config.Config, log *slog.Logger) *Collector {
 	return &Collector{cli: cli, out: out, cfg: cfg, log: log}
 }
 
 func (c *Collector) Run(ctx context.Context) error {
+	if err := c.fetchPropertyMap(ctx); err != nil {
+		return fmt.Errorf("property map: %w", err)
+	}
+
 	if err := c.refreshMeta(ctx); err != nil {
 		c.log.Warn("initial meta fetch failed; energy conversion deferred", "err", err)
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return c.tick(ctx, c.cfg.PollPower, "power", c.pollPower) })
-	g.Go(func() error { return c.tick(ctx, c.cfg.PollEnergy, "energy", c.pollEnergyMinute) })
-	g.Go(func() error { return c.tick(ctx, time.Hour, "status", c.pollStatus) })
+	if c.supportsEPC(echonet.EPCInstantPower) {
+		g.Go(func() error { return c.tick(ctx, c.cfg.PollPower, "power", c.pollPower) })
+	}
+	if c.supportsEPC(echonet.EPCCumulativeFwd) || c.supportsEPC(echonet.EPCCumulative1Min) {
+		g.Go(func() error { return c.tick(ctx, c.cfg.PollEnergy, "energy", c.pollEnergyMinute) })
+	}
+	if c.supportsEPC(echonet.EPCFaultStatus) {
+		g.Go(func() error { return c.tick(ctx, time.Hour, "status", c.pollStatus) })
+	}
 	g.Go(func() error { return c.tick(ctx, 24*time.Hour, "meta", c.refreshMeta) })
-	g.Go(func() error { return c.tickAt(ctx, []int{5, 35}, "energy30", c.pollEnergy30) })
+	if c.supportsEPC(echonet.EPCScheduledFwd) {
+		g.Go(func() error { return c.tickAt(ctx, []int{5, 35}, "energy30", c.pollEnergy30) })
+	}
 	g.Go(func() error { return c.handleINF(ctx) })
 	return g.Wait()
 }
