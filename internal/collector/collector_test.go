@@ -135,7 +135,7 @@ func TestPollPowerNoData(t *testing.T) {
 func TestPollEnergyMinuteAppliesParams(t *testing.T) {
 	s := &fakeSession{edt: map[byte][]byte{
 		echonet.EPCCumulativeFwd: {0x00, 0x01, 0x86, 0xA0}, // 100000
-		// 0xD0 は 15byte: 年月日+時分秒+正方向(100000)+逆方向
+		// 0xD0 を返せるメータでも、現在 pollEnergyMinute は D0 を要求しない。
 		echonet.EPCCumulative1Min: {
 			0x07, 0xEA, 0x06, 0x0F, 0x0A, 0x1E, 0x00,
 			0x00, 0x01, 0x86, 0xA0, // 正方向 100000
@@ -151,6 +151,30 @@ func TestPollEnergyMinuteAppliesParams(t *testing.T) {
 	}
 	if len(w.total) != 1 || w.total[0].KWh != 10000 || w.total[0].Raw != 100000 {
 		t.Fatalf("unexpected total: %+v", w.total)
+	}
+	// 0xD0 ジョブは無効化済みなので energy_1min は書かれない。
+	if len(w.min1) != 0 {
+		t.Fatalf("min1 should not be written (D0 disabled), got %d", len(w.min1))
+	}
+}
+
+// pollEnergy1Min は現在 pollEnergyMinute から呼ばれないが、0xD0 対応メータ向けに
+// ロジックは保持する。直接呼び出して換算・時刻処理を検証する。
+func TestPollEnergy1Min(t *testing.T) {
+	s := &fakeSession{edt: map[byte][]byte{
+		// 0xD0 は 15byte: 年月日+時分秒+正方向(100000)+逆方向
+		echonet.EPCCumulative1Min: {
+			0x07, 0xEA, 0x06, 0x0F, 0x0A, 0x1E, 0x00,
+			0x00, 0x01, 0x86, 0xA0, // 正方向 100000
+			0x00, 0x00, 0x00, 0x00, // 逆方向
+		},
+	}}
+	w := &fakeWriter{}
+	c := newTestCollector(s, w)
+	params := model.MeterParams{Coefficient: 1, UnitKWh: 0.1}
+
+	if err := c.pollEnergy1Min(context.Background(), params); err != nil {
+		t.Fatal(err)
 	}
 	if len(w.min1) != 1 || w.min1[0].KWh != 10000 || w.min1[0].Raw != 100000 {
 		t.Fatalf("unexpected min1: %+v", w.min1)

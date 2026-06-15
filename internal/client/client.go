@@ -18,6 +18,7 @@ type Client struct {
 	log *slog.Logger
 
 	sendMu sync.Mutex
+	reqSem chan struct{}
 
 	mu      sync.Mutex
 	nextTID uint16
@@ -30,6 +31,7 @@ func New(tr transport.Transport, log *slog.Logger) *Client {
 	return &Client{
 		tr:      tr,
 		log:     log,
+		reqSem:  make(chan struct{}, 1),
 		pending: make(map[uint16]chan echonet.Frame),
 		infCh:   make(chan echonet.Frame, infBuffer),
 	}
@@ -52,6 +54,13 @@ func (c *Client) SetC(ctx context.Context, props ...echonet.Property) (echonet.F
 }
 
 func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.Property) (echonet.Frame, error) {
+	select {
+	case c.reqSem <- struct{}{}:
+		defer func() { <-c.reqSem }()
+	case <-ctx.Done():
+		return echonet.Frame{}, ctx.Err()
+	}
+
 	tid := c.registerPending()
 	ch := c.pendingChan(tid)
 	defer c.clearPending(tid)

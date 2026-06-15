@@ -125,6 +125,56 @@ func TestSNAReturnsError(t *testing.T) {
 	}
 }
 
+func TestRequestsSerialized(t *testing.T) {
+	var mu sync.Mutex
+	var inFlight, maxInFlight int
+	gate := make(chan struct{})
+	tr := newFakeTransport(func(req echonet.Frame) []echonet.Frame {
+		mu.Lock()
+		inFlight++
+		if inFlight > maxInFlight {
+			maxInFlight = inFlight
+		}
+		mu.Unlock()
+		<-gate // メータが処理中の間ビジー状態を維持する
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return []echonet.Frame{{
+			TID: req.TID, SEOJ: echonet.EOJMeter, DEOJ: echonet.EOJController,
+			ESV:   echonet.ESVGetRes,
+			Props: []echonet.Property{{EPC: echonet.EPCInstantPower, EDT: []byte{0, 0, 2, 0}}},
+		}}
+	})
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+
+	const n = 3
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			gctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			_, _ = c.Get(gctx, echonet.EPCInstantPower)
+		}()
+	}
+	// 直列化されていれば、同時に待機中の responder は常に1つだけ。
+	for range n {
+		gate <- struct{}{}
+	}
+	wg.Wait()
+
+	mu.Lock()
+	got := maxInFlight
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("requests not serialized: max in-flight=%d, want 1", got)
+	}
+}
+
 func TestINFCSendsResponseAndNotifies(t *testing.T) {
 	var mu sync.Mutex
 	var sawINFCRes bool
