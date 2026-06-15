@@ -177,6 +177,9 @@ func (d *Device) handleEvent(line string) {
 func (d *Device) processEpandesc(line string) {
 	key, value, ok := strings.Cut(line, ":")
 	if !ok {
+		d.log.Warn("incomplete EPANDESC; resetting parser", "unexpected_line", line)
+		d.setState(stateNormal)
+		d.processNormal(line)
 		return
 	}
 	key = strings.TrimSpace(key)
