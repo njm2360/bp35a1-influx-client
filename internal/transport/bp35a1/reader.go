@@ -162,9 +162,15 @@ func (d *Device) handleEvent(line string) {
 	}
 	switch int(code) {
 	case evPANAConnectOK:
-		d.txAllowed.Store(true)
+		d.sessionEst.Store(true)
 	case evLifetimeExpire:
+		d.sessionEst.Store(false)
+	case evTxLimitOn:
+		d.log.Warn("ARIB transmit-time limit engaged; transmissions blocked")
 		d.txAllowed.Store(false)
+	case evTxLimitOff:
+		d.log.Info("ARIB transmit-time limit released")
+		d.txAllowed.Store(true)
 	}
 	ev := skEvent{code: int(code), sender: f[2]}
 	select {

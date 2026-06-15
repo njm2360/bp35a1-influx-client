@@ -10,7 +10,7 @@ import (
 
 func newTestDevice() *Device {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Device{
+	d := &Device{
 		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ctx:       ctx,
 		cancel:    cancel,
@@ -23,6 +23,8 @@ func newTestDevice() *Device {
 		rxudp:     make(chan []byte, 8),
 		closed:    make(chan struct{}),
 	}
+	d.txAllowed.Store(true)
+	return d
 }
 
 func TestFeedERXUDP(t *testing.T) {
@@ -55,8 +57,8 @@ func TestFeedERXUDPNonEchonetIgnored(t *testing.T) {
 func TestFeedEvent(t *testing.T) {
 	d := newTestDevice()
 	d.feed([]byte("EVENT 25 FE80::2\r\n")) // PANA_CONNECT_OK
-	if !d.txAllowed.Load() {
-		t.Fatal("txAllowed should be set on PANA connect OK")
+	if !d.sessionEst.Load() {
+		t.Fatal("sessionEst should be set on PANA connect OK")
 	}
 	select {
 	case ev := <-d.events:
@@ -77,8 +79,8 @@ func TestManageReconnectsOnLifetimeExpire(t *testing.T) {
 		called <- e
 		return e, true
 	}
-	// セッション確立済みを模して送信許可を立てておく。
-	d.txAllowed.Store(true)
+	// セッション確立済みを模しておく。
+	d.sessionEst.Store(true)
 	go d.manage(Epan{Channel: 0x21})
 
 	// EVENT 29 = PANA セッション期限切れ。
@@ -92,8 +94,8 @@ func TestManageReconnectsOnLifetimeExpire(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("reconnect was not triggered on EVENT 29")
 	}
-	if d.txAllowed.Load() {
-		t.Fatal("txAllowed should be cleared on session expiry")
+	if d.sessionEst.Load() {
+		t.Fatal("sessionEst should be cleared on session expiry")
 	}
 }
 

@@ -9,10 +9,10 @@ import (
 
 func TestHandleEventLifetimeExpireClearsTx(t *testing.T) {
 	d := newTestDevice()
-	d.txAllowed.Store(true)
+	d.sessionEst.Store(true)
 	d.feed([]byte("EVENT 29 FE80::2\r\n")) // セッション期限切れ
-	if d.txAllowed.Load() {
-		t.Fatal("txAllowed should be cleared on EVENT 29")
+	if d.sessionEst.Load() {
+		t.Fatal("sessionEst should be cleared on EVENT 29")
 	}
 	select {
 	case ev := <-d.events:
@@ -24,13 +24,25 @@ func TestHandleEventLifetimeExpireClearsTx(t *testing.T) {
 	}
 }
 
+func TestHandleEventTxLimit(t *testing.T) {
+	d := newTestDevice()                   // txAllowed=true(既定)
+	d.feed([]byte("EVENT 32 FE80::2\r\n")) // ARIB 送信総和時間制限 発動
+	if d.txAllowed.Load() {
+		t.Fatal("txAllowed should be cleared on EVENT 32")
+	}
+	d.feed([]byte("EVENT 33 FE80::2\r\n")) // 制限解除
+	if !d.txAllowed.Load() {
+		t.Fatal("txAllowed should be restored on EVENT 33")
+	}
+}
+
 func TestHandleEventMalformedIgnored(t *testing.T) {
 	d := newTestDevice()
-	d.txAllowed.Store(false)
+	d.sessionEst.Store(false)
 	d.feed([]byte("EVENT 25\r\n"))         // フィールド不足(<3)
 	d.feed([]byte("EVENT ZZ FE80::2\r\n")) // コードが不正な16進
-	if d.txAllowed.Load() {
-		t.Fatal("malformed EVENT must not set txAllowed")
+	if d.sessionEst.Load() {
+		t.Fatal("malformed EVENT must not set sessionEst")
 	}
 	if len(d.events) != 0 {
 		t.Fatalf("no event should be queued, got %d", len(d.events))

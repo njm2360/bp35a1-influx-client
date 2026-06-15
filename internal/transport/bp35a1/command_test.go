@@ -159,7 +159,7 @@ func TestSendBuildsSKSENDTO(t *testing.T) {
 	fp.onWrite = func([]byte) { fp.push([]byte("OK\r\n")) }
 	d := newDeviceWithPort(fp)
 	defer d.Close()
-	d.txAllowed.Store(true)
+	d.sessionEst.Store(true)
 	d.setIP("FE80::1")
 
 	if err := d.Send(context.Background(), []byte{0x10, 0x81}); err != nil {
@@ -179,9 +179,24 @@ func TestSendProhibitedWithoutSession(t *testing.T) {
 	fp := newFakePort()
 	d := newDeviceWithPort(fp)
 	defer d.Close()
-	// txAllowed=false(既定)。送信は即拒否され、ポートには何も書かれない。
+	// sessionEst=false(既定)。送信は即拒否され、ポートには何も書かれない。
 	if err := d.Send(context.Background(), []byte{0x10, 0x81}); err != ErrTxProhibited {
 		t.Fatalf("want ErrTxProhibited, got %v", err)
+	}
+	if fp.writtenString() != "" {
+		t.Fatalf("nothing should be written, got %q", fp.writtenString())
+	}
+}
+
+func TestSendBlockedByTxLimit(t *testing.T) {
+	fp := newFakePort()
+	d := newDeviceWithPort(fp)
+	defer d.Close()
+	// セッションは確立済みだが ARIB 送信総和時間制限が発動中(EVENT 0x32 相当)。
+	d.sessionEst.Store(true)
+	d.txAllowed.Store(false)
+	if err := d.Send(context.Background(), []byte{0x10, 0x81}); err != ErrTxLimited {
+		t.Fatalf("want ErrTxLimited, got %v", err)
 	}
 	if fp.writtenString() != "" {
 		t.Fatalf("nothing should be written, got %q", fp.writtenString())
@@ -283,8 +298,8 @@ func TestConnectHappyPath(t *testing.T) {
 	if got != ip {
 		t.Fatalf("ip want %q, got %q", ip, got)
 	}
-	if !d.txAllowed.Load() {
-		t.Fatal("txAllowed should be set after EVENT 25")
+	if !d.sessionEst.Load() {
+		t.Fatal("sessionEst should be set after EVENT 25")
 	}
 }
 
@@ -337,8 +352,8 @@ func TestReestablishReconnects(t *testing.T) {
 	if epan.Channel != 0x21 {
 		t.Fatalf("epan should be preserved: %+v", epan)
 	}
-	if d.getIP() != ip || !d.txAllowed.Load() {
-		t.Fatalf("session not restored: ip=%q tx=%v", d.getIP(), d.txAllowed.Load())
+	if d.getIP() != ip || !d.sessionEst.Load() {
+		t.Fatalf("session not restored: ip=%q tx=%v", d.getIP(), d.sessionEst.Load())
 	}
 }
 

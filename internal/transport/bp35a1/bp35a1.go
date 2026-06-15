@@ -46,6 +46,7 @@ const (
 
 var (
 	ErrTxProhibited = errors.New("bp35a1: UDP transmit prohibited (no PANA session)")
+	ErrTxLimited    = errors.New("bp35a1: UDP transmit blocked (ARIB transmit-time limit)")
 	ErrPANAConnect  = errors.New("bp35a1: PANA connection failed")
 	ErrClosed       = errors.New("bp35a1: device closed")
 )
@@ -100,8 +101,9 @@ type Device struct {
 
 	epanCache string
 
-	txAllowed atomic.Bool
-	ip        atomic.Value // string
+	sessionEst atomic.Bool
+	txAllowed  atomic.Bool
+	ip         atomic.Value // string
 
 	// reconnect は manage が PANA セッション期限切れを検知した際に呼ぶ。
 	// 既定では reestablish。テストで差し替え可能。
@@ -158,6 +160,7 @@ func Open(ctx context.Context, opts Options) (*Device, error) {
 		closed:    make(chan struct{}),
 	}
 	d.reconnect = d.reestablish
+	d.txAllowed.Store(true)
 
 	go d.readLoop()
 
@@ -194,15 +197,10 @@ func (d *Device) setup(ctx context.Context, opts Options, baud int) error {
 	d.setIP(ip)
 	d.log.Info("PANA connected", "ip", ip)
 
-	// 接続確立後に常駐監視を開始する。これ以降 d.events の唯一の消費者となり、
-	// PANA セッション期限切れ(EVENT 0x29)を検知して再接続する。
 	go d.manage(epan)
 	return nil
 }
 
-// manage は接続確立後に常駐し、d.events を消費する。
-// PANA セッション期限切れを検知したら txAllowed を落として再接続する。
-// connect/scan の events 読み取りはこのゴルーチンが直列に実行するため競合しない。
 func (d *Device) manage(epan Epan) {
 	for {
 		select {
@@ -213,7 +211,7 @@ func (d *Device) manage(epan Epan) {
 		case ev := <-d.events:
 			if ev.code == evLifetimeExpire {
 				d.log.Warn("PANA session expired; reconnecting")
-				d.txAllowed.Store(false)
+				d.sessionEst.Store(false)
 				next, ok := d.reconnect(epan)
 				if !ok {
 					return
@@ -409,8 +407,11 @@ func (d *Device) connect(ctx context.Context, epan Epan) (string, error) {
 }
 
 func (d *Device) Send(ctx context.Context, payload []byte) error {
-	if !d.txAllowed.Load() {
+	if !d.sessionEst.Load() {
 		return ErrTxProhibited
+	}
+	if !d.txAllowed.Load() {
+		return ErrTxLimited
 	}
 	params := []string{
 		"1",
