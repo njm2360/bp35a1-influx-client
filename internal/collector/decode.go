@@ -9,19 +9,10 @@ import (
 	"main/internal/model"
 )
 
-func findEDT(f echonet.Frame, epc byte) ([]byte, bool) {
-	for _, p := range f.Props {
-		if p.EPC == epc {
-			return p.EDT, true
-		}
-	}
-	return nil, false
-}
-
 func toPower(f echonet.Frame, now time.Time) (model.Power, error) {
 	out := model.Power{Time: now}
 
-	edt, ok := findEDT(f, echonet.EPCInstantPower)
+	edt, ok := f.EDT(echonet.EPCInstantPower)
 	if !ok {
 		return model.Power{}, fmt.Errorf("toPower: missing EPC 0xE7")
 	}
@@ -31,7 +22,7 @@ func toPower(f echonet.Frame, now time.Time) (model.Power, error) {
 	}
 	out.Watt, out.HasWatt = w, !noData
 
-	if edt, ok := findEDT(f, echonet.EPCInstantCurrent); ok {
+	if edt, ok := f.EDT(echonet.EPCInstantCurrent); ok {
 		r, t, rNo, tNo, err := echonet.DecodeCurrent(edt)
 		if err != nil {
 			return model.Power{}, err
@@ -56,6 +47,38 @@ func toEnergy(edt []byte, p model.MeterParams) (kwh float64, raw uint32, ok bool
 	return p.ToKWh(raw), raw, true, nil
 }
 
+func toEnergy1Min(f echonet.Frame, params model.MeterParams, loc *time.Location) (model.Energy1Min, bool, error) {
+	edt, ok := f.EDT(echonet.EPCCumulative1Min)
+	if !ok || len(edt) == 0 {
+		return model.Energy1Min{}, false, nil
+	}
+	t, raw, noData, err := echonet.DecodeCumulative1Min(edt, loc)
+	if err != nil {
+		return model.Energy1Min{}, false, err
+	}
+	if noData {
+		return model.Energy1Min{}, false, nil
+	}
+	if !params.Valid() {
+		return model.Energy1Min{}, false, fmt.Errorf("toEnergy1Min: meter params not ready")
+	}
+	return model.Energy1Min{Time: t, KWh: params.ToKWh(raw), Raw: raw}, true, nil
+}
+
+func toEnergy30(edt []byte, params model.MeterParams, loc *time.Location) (model.Energy30Min, bool, error) {
+	t, raw, noData, err := echonet.DecodeScheduled30(edt, loc)
+	if err != nil {
+		return model.Energy30Min{}, false, err
+	}
+	if noData {
+		return model.Energy30Min{}, false, nil
+	}
+	if !params.Valid() {
+		return model.Energy30Min{}, false, fmt.Errorf("toEnergy30: meter params not ready")
+	}
+	return model.Energy30Min{Time: t, KWh: params.ToKWh(raw), Raw: raw}, true, nil
+}
+
 func toStatus(edt []byte, now time.Time) (model.Status, error) {
 	if len(edt) != 1 {
 		return model.Status{}, fmt.Errorf("toStatus: expects 1 byte, got %d", len(edt))
@@ -66,27 +89,27 @@ func toStatus(edt []byte, now time.Time) (model.Status, error) {
 func toMeta(f echonet.Frame, now time.Time) (model.Meta, model.MeterParams) {
 	m := model.Meta{Time: now, Coefficient: 1}
 
-	if edt, ok := findEDT(f, echonet.EPCMakerCode); ok && len(edt) > 0 {
+	if edt, ok := f.EDT(echonet.EPCMakerCode); ok && len(edt) > 0 {
 		m.MakerCode = "0x" + hex.EncodeToString(edt)
 	}
-	if edt, ok := findEDT(f, echonet.EPCSerialNumber); ok && len(edt) > 0 {
+	if edt, ok := f.EDT(echonet.EPCSerialNumber); ok && len(edt) > 0 {
 		m.Serial = echonet.DecodeString(edt)
 	}
-	if edt, ok := findEDT(f, echonet.EPCBRouteID); ok && len(edt) > 0 {
+	if edt, ok := f.EDT(echonet.EPCBRouteID); ok && len(edt) > 0 {
 		m.BRouteID = hex.EncodeToString(edt)
 	}
-	if edt, ok := findEDT(f, echonet.EPCCoefficient); ok {
+	if edt, ok := f.EDT(echonet.EPCCoefficient); ok {
 		if v, noData, err := echonet.DecodeU32(edt); err == nil && !noData {
 			m.Coefficient = int(v)
 		}
 	}
-	if edt, ok := findEDT(f, echonet.EPCUnit); ok && len(edt) == 1 {
+	if edt, ok := f.EDT(echonet.EPCUnit); ok && len(edt) == 1 {
 		m.UnitKWh = echonet.UnitKwh(edt[0])
 	}
-	if edt, ok := findEDT(f, echonet.EPCDigits); ok && len(edt) == 1 {
+	if edt, ok := f.EDT(echonet.EPCDigits); ok && len(edt) == 1 {
 		m.Digits = int(edt[0])
 	}
-	if edt, ok := findEDT(f, echonet.EPCStandardVersion); ok && len(edt) > 0 {
+	if edt, ok := f.EDT(echonet.EPCStandardVersion); ok && len(edt) > 0 {
 		m.Version = "0x" + hex.EncodeToString(edt)
 	}
 

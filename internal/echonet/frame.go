@@ -95,6 +95,15 @@ func (f Frame) Encode() []byte {
 	return b
 }
 
+func (f Frame) EDT(epc byte) ([]byte, bool) {
+	for _, p := range f.Props {
+		if p.EPC == epc {
+			return p.EDT, true
+		}
+	}
+	return nil, false
+}
+
 func Decode(b []byte) (Frame, error) {
 	if len(b) < 12 {
 		return Frame{}, fmt.Errorf("echonet: frame too short: %d bytes", len(b))

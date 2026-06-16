@@ -146,16 +146,12 @@ func (c *Collector) loadParams() model.MeterParams {
 }
 
 func (c *Collector) writeScheduled30(ctx context.Context, edt []byte) error {
-	t, raw, noData, err := echonet.DecodeScheduled30(edt, c.cfg.Location)
+	m, ok, err := toEnergy30(edt, c.loadParams(), c.cfg.Location)
 	if err != nil {
 		return err
 	}
-	if noData {
+	if !ok {
 		return nil
 	}
-	p := c.loadParams()
-	if !p.Valid() {
-		return fmt.Errorf("writeScheduled30: meter params not ready")
-	}
-	return c.out.WriteEnergy30Min(ctx, model.Energy30Min{Time: t, KWh: p.ToKWh(raw), Raw: raw})
+	return c.out.WriteEnergy30Min(ctx, m)
 }

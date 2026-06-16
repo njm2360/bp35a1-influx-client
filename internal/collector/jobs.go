@@ -23,7 +23,6 @@ func (c *Collector) getPartial(ctx context.Context, epcs ...byte) (echonet.Frame
 	return f, nil
 }
 
-// 瞬時電力・電流(0xE7,0xE8)を取得して書き込む
 func (c *Collector) pollPower(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
 	defer cancel()
@@ -51,7 +50,6 @@ func (c *Collector) pollEnergyMinute(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// 0xE0 積算電力量計測値(正方向)
 func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParams) error {
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
 	defer cancel()
@@ -60,7 +58,7 @@ func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParam
 	if err != nil {
 		return err
 	}
-	if edt, ok := findEDT(f, echonet.EPCCumulativeFwd); ok {
+	if edt, ok := f.EDT(echonet.EPCCumulativeFwd); ok {
 		if kwh, raw, ok, err := toEnergy(edt, params); err != nil {
 			c.log.Warn("energy_total decode", "err", err)
 		} else if ok {
@@ -72,7 +70,6 @@ func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParam
 	return nil
 }
 
-// 0xD0 1分積算電力量計測値。正方向値と埋め込み計測時刻を使う。
 func (c *Collector) pollEnergy1Min(ctx context.Context, params model.MeterParams) error {
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
 	defer cancel()
@@ -81,24 +78,15 @@ func (c *Collector) pollEnergy1Min(ctx context.Context, params model.MeterParams
 	if err != nil {
 		return err
 	}
-	edt, ok := findEDT(f, echonet.EPCCumulative1Min)
-	if !ok || len(edt) == 0 {
-		c.log.Warn("energy_1min: 0xD0 not returned")
-		return nil
-	}
-	t, raw, noData, err := echonet.DecodeCumulative1Min(edt, c.cfg.Location)
-	switch {
-	case err != nil:
+	m, ok, err := toEnergy1Min(f, params, c.cfg.Location)
+	if err != nil {
 		c.log.Warn("energy_1min decode", "err", err)
 		return nil
-	case noData:
-		return nil // 欠測。書き込まない。
-	case !params.Valid():
-		c.log.Warn("energy_1min: meter params not ready")
-		return nil
-	default:
-		return c.out.WriteEnergy1Min(ctx, model.Energy1Min{Time: t, KWh: params.ToKWh(raw), Raw: raw})
 	}
+	if !ok {
+		return nil
+	}
+	return c.out.WriteEnergy1Min(ctx, m)
 }
 
 func (c *Collector) pollStatus(ctx context.Context) error {
@@ -109,7 +97,7 @@ func (c *Collector) pollStatus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	edt, ok := findEDT(f, echonet.EPCFaultStatus)
+	edt, ok := f.EDT(echonet.EPCFaultStatus)
 	if !ok {
 		return fmt.Errorf("pollStatus: missing EPC 0x88")
 	}
@@ -128,7 +116,7 @@ func (c *Collector) pollEnergy30(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	edt, ok := findEDT(f, echonet.EPCScheduledFwd)
+	edt, ok := f.EDT(echonet.EPCScheduledFwd)
 	if !ok {
 		return fmt.Errorf("pollEnergy30: missing EPC 0xEA")
 	}
@@ -163,7 +151,7 @@ func (c *Collector) fetchPropertyMap(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get 0x9F: %w", err)
 	}
-	edt, ok := findEDT(f, echonet.EPCGetPropertyMap)
+	edt, ok := f.EDT(echonet.EPCGetPropertyMap)
 	if !ok || len(edt) == 0 {
 		return fmt.Errorf("0x9F not returned")
 	}
