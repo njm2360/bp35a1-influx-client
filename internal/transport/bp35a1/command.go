@@ -18,6 +18,7 @@ func (d *Device) sendUDP(ctx context.Context, params []string, payload []byte) (
 func (d *Device) exec(ctx context.Context, cmd string, params []string, data []byte, timeout time.Duration, expectEcho bool) (string, error) {
 	d.cmdMu.Lock()
 	defer d.cmdMu.Unlock()
+	start := time.Now()
 
 	d.drainResponses()
 
@@ -64,9 +65,12 @@ func (d *Device) exec(ctx context.Context, cmd string, params []string, data []b
 	case <-timer.C:
 		return "", fmt.Errorf("bp35a1: %s result timeout", cmd)
 	case res := <-d.results:
+		elapsed := time.Since(start)
 		if strings.HasPrefix(res, "FAIL") {
+			d.log.Debug("command failed", "cmd", cmd, "result", res, "elapsed", elapsed)
 			return "", commandError(res)
 		}
+		d.log.Debug("command ok", "cmd", cmd, "elapsed", elapsed)
 		return d.collectResponses(), nil
 	}
 }
@@ -74,11 +78,13 @@ func (d *Device) exec(ctx context.Context, cmd string, params []string, data []b
 func (d *Device) skipEcho(sent string) {
 	select {
 	case <-time.After(time.Second):
+		d.log.Debug("echo timeout", "expected", sent)
 	case <-d.closed:
 	case line := <-d.responses:
 		if line == sent {
 			return
 		}
+		d.log.Debug("echo mismatch", "expected", sent, "got", line)
 		select {
 		case d.responses <- line:
 		default:
@@ -99,11 +105,17 @@ func (d *Device) collectResponses() string {
 }
 
 func (d *Device) drainResponses() {
+	var n int
 	for {
 		select {
 		case <-d.results:
+			n++
 		case <-d.responses:
+			n++
 		default:
+			if n > 0 {
+				d.log.Debug("drained stale responses", "count", n)
+			}
 			return
 		}
 	}

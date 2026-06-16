@@ -32,13 +32,9 @@ func (d *Device) readLoop() {
 				return
 			default:
 			}
-			// Windows ではボーレート検出時の ResetInputBuffer(PurgeComm/PURGE_RXABORT)が
-			// 進行中の Read を中断し ERROR_OPERATION_ABORTED("Port has been closed")を返す。
-			// ポート自体は有効で次の Read で復帰できるため、致命扱いせず継続する。
-			// ポートが本当に失われた場合に備え、連続失敗が続いたら打ち切る。
 			errCount++
 			if errCount >= maxConsecutiveReadErrors {
-				d.log.Warn("serial read error; giving up", "err", err, "consecutive", errCount)
+				d.log.Error("serial read error; giving up", "err", err, "consecutive", errCount)
 				return
 			}
 			d.log.Debug("serial read error; retrying", "err", err, "consecutive", errCount)
@@ -139,13 +135,15 @@ func (d *Device) handleERXUDP(line string) {
 		return
 	}
 	if int(dstPort) != echonetPort {
-		return // ECHONET Lite 以外は無視
+		d.log.Debug("ERXUDP ignored (non-ECHONET)", "dst_port", fmt.Sprintf("%04X", dstPort))
+		return
 	}
 	payload, err := hexToBytes(f[8])
 	if err != nil {
 		d.log.Warn("bad ERXUDP payload", "err", err)
 		return
 	}
+	d.log.Debug("ERXUDP received", "src", f[1], "len", len(payload))
 	select {
 	case d.rxudp <- payload:
 	case <-d.closed:
@@ -155,10 +153,12 @@ func (d *Device) handleERXUDP(line string) {
 func (d *Device) handleEvent(line string) {
 	f := strings.Split(line, " ")
 	if len(f) < 3 {
+		d.log.Warn("malformed EVENT (too few fields)", "line", line)
 		return
 	}
 	code, err := strconv.ParseInt(f[1], 16, 32)
 	if err != nil {
+		d.log.Warn("malformed EVENT code", "raw", f[1], "err", err)
 		return
 	}
 	name := eventName[int(code)]
@@ -183,7 +183,7 @@ func (d *Device) handleEvent(line string) {
 	select {
 	case d.events <- ev:
 	default:
-		d.log.Debug("event channel full, dropping", "code", code)
+		d.log.Warn("event channel full, dropping", "code", fmt.Sprintf("0x%02X", code))
 	}
 }
 
@@ -246,8 +246,12 @@ func (d *Device) setMode(newline string, state rxState) {
 
 func (d *Device) setState(s rxState) {
 	d.rxMu.Lock()
+	prev := d.state
 	d.state = s
 	d.rxMu.Unlock()
+	if prev != s {
+		d.log.Debug("parser state change", "from", prev, "to", s)
+	}
 }
 
 func (d *Device) currentState() rxState {

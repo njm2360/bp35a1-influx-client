@@ -96,6 +96,21 @@ const (
 	stateProductRead
 )
 
+func (s rxState) String() string {
+	switch s {
+	case stateNormal:
+		return "normal"
+	case stateEpandesc:
+		return "epandesc"
+	case stateSKLL64:
+		return "skll64"
+	case stateProductRead:
+		return "product_read"
+	default:
+		return "unknown"
+	}
+}
+
 type Options struct {
 	Port      string
 	Baud      int
@@ -284,7 +299,7 @@ func (d *Device) reestablish(epan Epan) (Epan, bool) {
 		if d.ctx.Err() != nil {
 			return epan, false
 		}
-		d.log.Warn("reconnect attempt failed", "attempt", attempt, "err", err)
+		d.log.Warn("reconnect attempt failed", "attempt", attempt, "err", err, "backoff", backoff)
 
 		select {
 		case <-d.ctx.Done():
