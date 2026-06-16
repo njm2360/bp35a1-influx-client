@@ -60,7 +60,7 @@ func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParam
 	}
 	if edt, ok := f.EDT(echonet.EPCCumulativeFwd); ok {
 		if kwh, raw, ok, err := toEnergy(edt, params); err != nil {
-			c.log.Warn("energy_total decode", "err", err)
+			c.log.Warn("energy_total decode failed", "err", err)
 		} else if ok {
 			if err := c.out.WriteEnergyTotal(ctx, model.EnergyTotal{Time: time.Now(), KWh: kwh, Raw: raw}); err != nil {
 				return err
@@ -80,7 +80,7 @@ func (c *Collector) pollEnergy1Min(ctx context.Context, params model.MeterParams
 	}
 	m, ok, err := toEnergy1Min(f, params, c.cfg.Location)
 	if err != nil {
-		c.log.Warn("energy_1min decode", "err", err)
+		c.log.Warn("energy_1min decode failed", "err", err)
 		return nil
 	}
 	if !ok {
@@ -136,6 +136,7 @@ func (c *Collector) refreshMeta(ctx context.Context) error {
 	}
 	meta, params := toMeta(f, time.Now())
 	c.params.Store(&params)
+	c.log.Debug("meter params loaded", "coefficient", params.Coefficient, "unit_kwh", params.UnitKWh)
 	if !params.Valid() {
 		c.log.Warn("meter params incomplete", "coefficient", params.Coefficient, "unit_kwh", params.UnitKWh)
 	}
@@ -167,7 +168,11 @@ func (c *Collector) fetchPropertyMap(ctx context.Context) error {
 
 	list := make([]string, len(epcs))
 	for i, e := range epcs {
-		list[i] = fmt.Sprintf("0x%02X", e)
+		if name, ok := echonet.MeterEPCName(e); ok {
+			list[i] = fmt.Sprintf("0x%02X(%s)", e, name)
+		} else {
+			list[i] = fmt.Sprintf("0x%02X(未対応)", e)
+		}
 	}
 	c.log.Info("property map", "count", len(epcs), "epcs", strings.Join(list, ","))
 	return nil

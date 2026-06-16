@@ -73,8 +73,11 @@ func (c *Collector) tick(ctx context.Context, d time.Duration, name string, job 
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.C:
+			start := time.Now()
 			if err := job(ctx); err != nil {
-				c.log.Warn("job failed", "job", name, "err", err)
+				c.log.Warn("job failed", "job", name, "err", err, "elapsed", time.Since(start))
+			} else {
+				c.log.Debug("job completed", "job", name, "elapsed", time.Since(start))
 			}
 		}
 	}
@@ -89,8 +92,11 @@ func (c *Collector) tickAt(ctx context.Context, minutes []int, name string, job 
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
+			start := time.Now()
 			if err := job(ctx); err != nil {
-				c.log.Warn("job failed", "job", name, "err", err)
+				c.log.Warn("job failed", "job", name, "err", err, "elapsed", time.Since(start))
+			} else {
+				c.log.Debug("job completed", "job", name, "elapsed", time.Since(start))
 			}
 		}
 	}
@@ -122,6 +128,7 @@ func (c *Collector) handleINF(ctx context.Context) error {
 }
 
 func (c *Collector) handleINFFrame(ctx context.Context, f echonet.Frame) {
+	c.log.Debug("handling INF", "props", len(f.Props))
 	for _, p := range f.Props {
 		switch p.EPC {
 		case echonet.EPCScheduledFwd:
@@ -129,10 +136,13 @@ func (c *Collector) handleINFFrame(ctx context.Context, f echonet.Frame) {
 				c.log.Warn("inf energy30 failed", "err", err)
 			}
 		case echonet.EPCFaultStatus:
-			if st, err := toStatus(p.EDT, time.Now()); err == nil {
-				if err := c.out.WriteStatus(ctx, st); err != nil {
-					c.log.Warn("inf status write failed", "err", err)
-				}
+			st, err := toStatus(p.EDT, time.Now())
+			if err != nil {
+				c.log.Warn("inf status decode failed", "err", err)
+				continue
+			}
+			if err := c.out.WriteStatus(ctx, st); err != nil {
+				c.log.Warn("inf status write failed", "err", err)
 			}
 		}
 	}

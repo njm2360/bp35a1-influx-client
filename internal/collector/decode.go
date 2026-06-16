@@ -16,11 +16,11 @@ func toPower(f echonet.Frame, now time.Time) (model.Power, error) {
 	if !ok {
 		return model.Power{}, fmt.Errorf("toPower: missing EPC 0xE7")
 	}
-	w, noData, err := echonet.DecodeS32(edt)
+	p, err := echonet.DecodeInstantPower(edt)
 	if err != nil {
 		return model.Power{}, err
 	}
-	out.Watt, out.HasWatt = w, !noData
+	out.Watt, out.HasWatt = p.Watt, !p.NoData
 
 	if edt, ok := f.EDT(echonet.EPCInstantCurrent); ok {
 		r, t, rNo, tNo, err := echonet.DecodeCurrent(edt)
@@ -34,17 +34,17 @@ func toPower(f echonet.Frame, now time.Time) (model.Power, error) {
 }
 
 func toEnergy(edt []byte, p model.MeterParams) (kwh float64, raw uint32, ok bool, err error) {
-	raw, noData, err := echonet.DecodeU32(edt)
+	e, err := echonet.DecodeCumulativeEnergy(edt)
 	if err != nil {
 		return 0, 0, false, err
 	}
-	if noData {
+	if e.NoData {
 		return 0, 0, false, nil
 	}
 	if !p.Valid() {
-		return 0, raw, false, fmt.Errorf("toEnergy: meter params not ready")
+		return 0, e.Raw, false, fmt.Errorf("toEnergy: meter params not ready")
 	}
-	return p.ToKWh(raw), raw, true, nil
+	return p.ToKWh(e.Raw), e.Raw, true, nil
 }
 
 func toEnergy1Min(f echonet.Frame, params model.MeterParams, loc *time.Location) (model.Energy1Min, bool, error) {
@@ -52,17 +52,17 @@ func toEnergy1Min(f echonet.Frame, params model.MeterParams, loc *time.Location)
 	if !ok || len(edt) == 0 {
 		return model.Energy1Min{}, false, nil
 	}
-	t, raw, noData, err := echonet.DecodeCumulative1Min(edt, loc)
+	c, err := echonet.DecodeCumulative1Min(edt, loc)
 	if err != nil {
 		return model.Energy1Min{}, false, err
 	}
-	if noData {
+	if c.FwdNoData {
 		return model.Energy1Min{}, false, nil
 	}
 	if !params.Valid() {
 		return model.Energy1Min{}, false, fmt.Errorf("toEnergy1Min: meter params not ready")
 	}
-	return model.Energy1Min{Time: t, KWh: params.ToKWh(raw), Raw: raw}, true, nil
+	return model.Energy1Min{Time: c.Time, KWh: params.ToKWh(c.Fwd), Raw: c.Fwd}, true, nil
 }
 
 func toEnergy30(edt []byte, params model.MeterParams, loc *time.Location) (model.Energy30Min, bool, error) {
@@ -96,18 +96,22 @@ func toMeta(f echonet.Frame, now time.Time) (model.Meta, model.MeterParams) {
 		m.Serial = echonet.DecodeString(edt)
 	}
 	if edt, ok := f.EDT(echonet.EPCBRouteID); ok && len(edt) > 0 {
-		m.BRouteID = hex.EncodeToString(edt)
+		if id, err := echonet.DecodeBRouteID(edt); err == nil {
+			m.BRouteID = hex.EncodeToString(id.Raw)
+		}
 	}
 	if edt, ok := f.EDT(echonet.EPCCoefficient); ok {
-		if v, noData, err := echonet.DecodeU32(edt); err == nil && !noData {
+		if v, err := echonet.DecodeCoefficient(edt); err == nil {
 			m.Coefficient = int(v)
 		}
 	}
 	if edt, ok := f.EDT(echonet.EPCUnit); ok && len(edt) == 1 {
 		m.UnitKWh = echonet.UnitKwh(edt[0])
 	}
-	if edt, ok := f.EDT(echonet.EPCDigits); ok && len(edt) == 1 {
-		m.Digits = int(edt[0])
+	if edt, ok := f.EDT(echonet.EPCDigits); ok {
+		if d, err := echonet.DecodeDigits(edt); err == nil {
+			m.Digits = d
+		}
 	}
 	if edt, ok := f.EDT(echonet.EPCStandardVersion); ok && len(edt) > 0 {
 		m.Version = "0x" + hex.EncodeToString(edt)

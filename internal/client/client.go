@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"main/internal/echonet"
 	"main/internal/transport"
@@ -60,6 +61,7 @@ func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.P
 	case <-ctx.Done():
 		return echonet.Frame{}, ctx.Err()
 	}
+	start := time.Now()
 
 	tid := c.registerPending()
 	ch := c.pendingChan(tid)
@@ -80,10 +82,13 @@ func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.P
 	case <-ctx.Done():
 		return echonet.Frame{}, ctx.Err()
 	case resp := <-ch:
+		elapsed := time.Since(start)
 		switch resp.ESV {
 		case echonet.ESVGetSNA, echonet.ESVSetCSNA:
+			c.log.Debug("request SNA", "tid", tid, "elapsed", elapsed)
 			return resp, fmt.Errorf("client: meter returned SNA (esv=%#x)", byte(resp.ESV))
 		}
+		c.log.Debug("request ok", "tid", tid, "elapsed", elapsed)
 		return resp, nil
 	}
 }
@@ -114,10 +119,10 @@ func (c *Client) dispatch(ctx context.Context, f echonet.Frame) {
 		c.sendINFCRes(ctx, f)
 		c.notify(f)
 	case f.ESV.IsRequest():
-		// 自ノード宛の要求。応答可能なプロパティを持たないため、一律で対応する不可応答(SNA)を返す
+		c.log.Debug("unsupported request, sending SNA", "esv", fmt.Sprintf("0x%02X", byte(f.ESV)), "tid", f.TID)
 		c.sendSNA(ctx, f)
 	default:
-		c.log.Debug("ignoring frame", "esv", fmt.Sprintf("%#x", byte(f.ESV)))
+		c.log.Debug("ignoring frame", "esv", fmt.Sprintf("0x%02X", byte(f.ESV)))
 	}
 }
 
@@ -131,6 +136,7 @@ func (c *Client) deliver(f echonet.Frame) {
 	}
 	select {
 	case ch <- f:
+		c.log.Debug("response delivered", "tid", f.TID)
 	default:
 		c.log.Warn("pending channel full, dropping response", "tid", f.TID)
 	}
@@ -139,6 +145,7 @@ func (c *Client) deliver(f echonet.Frame) {
 func (c *Client) notify(f echonet.Frame) {
 	select {
 	case c.infCh <- f:
+		c.log.Debug("INF dispatched", "esv", fmt.Sprintf("0x%02X", byte(f.ESV)), "props", len(f.Props))
 	default:
 		c.log.Warn("INF channel full, dropping notification (will recover via poll)")
 	}
@@ -176,7 +183,7 @@ func (c *Client) sendSNA(ctx context.Context, in echonet.Frame) {
 		Props: in.Props,
 	}
 	if err := c.send(ctx, resp); err != nil {
-		c.log.Warn("failed to send SNA", "err", err, "tid", in.TID, "esv", fmt.Sprintf("%#x", byte(sna)))
+		c.log.Warn("failed to send SNA", "err", err, "tid", in.TID, "esv", fmt.Sprintf("0x%02X", byte(sna)))
 	}
 }
 
