@@ -1,7 +1,5 @@
 package echonet
 
-// 低圧スマート電力量メータクラス(0x02/0x88)固有の EPC とデコーダ。
-
 import (
 	"encoding/binary"
 	"fmt"
@@ -29,21 +27,120 @@ const (
 	EPCHistoryDay3           byte = 0xEF // 積算履歴収集日3
 )
 
+// 0xD0 1分積算電力量計測値(正方向・逆方向計測値)
+type Cumulative1Min struct {
+	Time                 time.Time
+	Fwd, Rev             uint32
+	FwdNoData, RevNoData bool
+}
+
 // 0xD0 1分積算電力量計測値
-func DecodeCumulative1Min(edt []byte, loc *time.Location) (t time.Time, fwd uint32, noData bool, err error) {
+func DecodeCumulative1Min(edt []byte, loc *time.Location) (Cumulative1Min, error) {
 	if len(edt) != 15 {
-		return time.Time{}, 0, false, fmt.Errorf("echonet: cumulative1min expects 15 bytes, got %d", len(edt))
+		return Cumulative1Min{}, fmt.Errorf("echonet: cumulative1min expects 15 bytes, got %d", len(edt))
 	}
-	t = time.Date(
-		int(binary.BigEndian.Uint16(edt[0:2])),
-		time.Month(edt[2]), int(edt[3]),
-		int(edt[4]), int(edt[5]), int(edt[6]), 0, loc,
-	)
-	fwd = binary.BigEndian.Uint32(edt[7:11])
-	if fwd == noData32 {
-		noData = true
+	fwd := binary.BigEndian.Uint32(edt[7:11])
+	rev := binary.BigEndian.Uint32(edt[11:15])
+	return Cumulative1Min{
+		Time: time.Date(
+			int(binary.BigEndian.Uint16(edt[0:2])),
+			time.Month(edt[2]), int(edt[3]),
+			int(edt[4]), int(edt[5]), int(edt[6]), 0, loc,
+		),
+		Fwd:       fwd,
+		Rev:       rev,
+		FwdNoData: fwd == noData32,
+		RevNoData: rev == noData32,
+	}, nil
+}
+
+// 0xC0 Bルート識別番号(16バイト)。
+type BRouteID struct {
+	Raw []byte
+}
+
+func (b BRouteID) MakerCode() []byte {
+	if len(b.Raw) < 4 {
+		return nil
 	}
-	return t, fwd, noData, nil
+	return b.Raw[1:4]
+}
+
+// 0xC0 Bルート識別番号
+func DecodeBRouteID(edt []byte) (BRouteID, error) {
+	if len(edt) != 16 {
+		return BRouteID{}, fmt.Errorf("echonet: b-route id expects 16 bytes, got %d", len(edt))
+	}
+	return BRouteID{Raw: append([]byte(nil), edt...)}, nil
+}
+
+// 0xD3 係数
+func DecodeCoefficient(edt []byte) (uint32, error) {
+	if len(edt) != 4 {
+		return 0, fmt.Errorf("echonet: coefficient expects 4 bytes, got %d", len(edt))
+	}
+	return binary.BigEndian.Uint32(edt), nil
+}
+
+// 0xD7 積算電力量有効桁数(1～8)
+func DecodeDigits(edt []byte) (int, error) {
+	if len(edt) != 1 {
+		return 0, fmt.Errorf("echonet: digits expects 1 byte, got %d", len(edt))
+	}
+	return int(edt[0]), nil
+}
+
+// 0xE0/0xE3 積算電力量計測値(正方向・逆方向)
+type CumulativeEnergy struct {
+	Raw    uint32
+	NoData bool
+}
+
+// 0xE0/0xE3 積算電力量計測値
+func DecodeCumulativeEnergy(edt []byte) (CumulativeEnergy, error) {
+	v, noData, err := DecodeU32(edt)
+	if err != nil {
+		return CumulativeEnergy{}, err
+	}
+	return CumulativeEnergy{Raw: v, NoData: noData}, nil
+}
+
+// 0xE5 積算履歴収集日1
+func DecodeHistoryCollectDay(edt []byte) (day int, unset bool, err error) {
+	if len(edt) != 1 {
+		return 0, false, fmt.Errorf("echonet: history collect day expects 1 byte, got %d", len(edt))
+	}
+	if edt[0] == 0xFF {
+		return 0, true, nil
+	}
+	return int(edt[0]), false, nil
+}
+
+// 0xE5 積算履歴収集日1
+func EncodeHistoryCollectDay1(day int) (Property, error) {
+	if day < 0 || day > 99 {
+		return Property{}, fmt.Errorf("echonet: history collect day out of range: %d (want 0-99)", day)
+	}
+	return Property{EPC: EPCHistoryDay1, EDT: []byte{byte(day)}}, nil
+}
+
+// 0xE7 瞬時電力計測値
+type InstantPower struct {
+	Watt   int32
+	NoData bool
+}
+
+// 0xE7 瞬時電力計測値
+func DecodeInstantPower(edt []byte) (InstantPower, error) {
+	if len(edt) != 4 {
+		return InstantPower{}, fmt.Errorf("echonet: instant power expects 4 bytes, got %d", len(edt))
+	}
+	u := binary.BigEndian.Uint32(edt)
+	switch u {
+	case 0x80000000, 0x7FFFFFFF, 0x7FFFFFFE:
+		return InstantPower{Watt: int32(u), NoData: true}, nil
+	}
+	return InstantPower{Watt: int32(u)}, nil
 }
 
 // 0xE1 積算電力量単位
@@ -96,6 +193,12 @@ func DecodeCumulativeHistory1(edt []byte) (CumulativeHistory1, error) {
 	return h, nil
 }
 
+// 0xE8 瞬時電流計測値(R相・T相)
+type InstantCurrent struct {
+	R, T             float64
+	RNoData, TNoData bool
+}
+
 // 0xE8 瞬時電流計測値
 func DecodeCurrent(edt []byte) (rA float64, tA float64, rNoData, tNoData bool, err error) {
 	if len(edt) != 4 {
@@ -110,6 +213,13 @@ func DecodeCurrent(edt []byte) (rA float64, tA float64, rNoData, tNoData bool, e
 		tNoData = true
 	}
 	return float64(r) / 10.0, float64(t) / 10.0, rNoData, tNoData, nil
+}
+
+// 0xEA/0xEB 定時積算電力量計測値(正方向・逆方向)
+type Scheduled struct {
+	Time   time.Time
+	Raw    uint32
+	NoData bool
 }
 
 // 0xEA/0xEB 定時積算電力量計測値
@@ -193,4 +303,46 @@ func DecodeHistoryCollectSpec(edt []byte, loc *time.Location) (HistoryCollectSpe
 		),
 		Frames: int(edt[6]),
 	}, nil
+}
+
+func encodeHistorySpec(t time.Time, frames int) ([]byte, error) {
+	y := t.Year()
+	if y < 1 || y > 9999 {
+		return nil, fmt.Errorf("echonet: history spec year out of range: %d (want 1-9999)", y)
+	}
+	edt := make([]byte, 7)
+	binary.BigEndian.PutUint16(edt[0:2], uint16(y))
+	edt[2] = byte(t.Month())
+	edt[3] = byte(t.Day())
+	edt[4] = byte(t.Hour())
+	edt[5] = byte(t.Minute())
+	edt[6] = byte(frames)
+	return edt, nil
+}
+
+// 0xED 積算履歴収集日2 エンコーダ
+func EncodeHistoryCollectSpec2(t time.Time, frames int) (Property, error) {
+	if m := t.Minute(); m != 0 && m != 30 {
+		return Property{}, fmt.Errorf("echonet: history2 minute must be 0 or 30, got %d", m)
+	}
+	if frames < 1 || frames > 12 {
+		return Property{}, fmt.Errorf("echonet: history2 frames must be 1-12, got %d", frames)
+	}
+	edt, err := encodeHistorySpec(t, frames)
+	if err != nil {
+		return Property{}, err
+	}
+	return Property{EPC: EPCHistoryDay2, EDT: edt}, nil
+}
+
+// 0xEF 積算履歴収集日3 エンコーダ
+func EncodeHistoryCollectSpec3(t time.Time, frames int) (Property, error) {
+	if frames < 1 || frames > 10 {
+		return Property{}, fmt.Errorf("echonet: history3 frames must be 1-10, got %d", frames)
+	}
+	edt, err := encodeHistorySpec(t, frames)
+	if err != nil {
+		return Property{}, err
+	}
+	return Property{EPC: EPCHistoryDay3, EDT: edt}, nil
 }

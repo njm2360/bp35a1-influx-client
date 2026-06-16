@@ -64,23 +64,26 @@ func TestUnitKwh(t *testing.T) {
 
 func TestDecodeCumulative1Min(t *testing.T) {
 	jst := time.FixedZone("JST", 9*3600)
-	// 2026-06-15 10:30:00 / 正方向 123456(0x0001E240) / 逆方向 999(無視)
+	// 2026-06-15 10:30:00 / 正方向 123456(0x0001E240) / 逆方向 999(0x000003E7)
 	edt := []byte{
 		0x07, 0xEA, 0x06, 0x0F, // 年月日
 		0x0A, 0x1E, 0x00, // 時分秒
 		0x00, 0x01, 0xE2, 0x40, // 正方向積算
-		0x00, 0x00, 0x03, 0xE7, // 逆方向積算(使わない)
+		0x00, 0x00, 0x03, 0xE7, // 逆方向積算
 	}
-	tm, fwd, noData, err := DecodeCumulative1Min(edt, jst)
-	if err != nil || noData {
-		t.Fatalf("err=%v noData=%v", err, noData)
+	c, err := DecodeCumulative1Min(edt, jst)
+	if err != nil || c.FwdNoData || c.RevNoData {
+		t.Fatalf("err=%v fwdNoData=%v revNoData=%v", err, c.FwdNoData, c.RevNoData)
 	}
-	if fwd != 123456 {
-		t.Fatalf("fwd want 123456, got %d", fwd)
+	if c.Fwd != 123456 {
+		t.Fatalf("fwd want 123456, got %d", c.Fwd)
+	}
+	if c.Rev != 999 {
+		t.Fatalf("rev want 999, got %d", c.Rev)
 	}
 	want := time.Date(2026, 6, 15, 10, 30, 0, 0, jst)
-	if !tm.Equal(want) {
-		t.Fatalf("time want %v, got %v", want, tm)
+	if !c.Time.Equal(want) {
+		t.Fatalf("time want %v, got %v", want, c.Time)
 	}
 }
 
@@ -89,16 +92,17 @@ func TestDecodeCumulative1MinNoData(t *testing.T) {
 	edt := []byte{
 		0x07, 0xEA, 0x06, 0x0F, 0x0A, 0x1E, 0x00,
 		0xFF, 0xFF, 0xFF, 0xFE, // 正方向 noData
-		0x00, 0x00, 0x00, 0x00,
+		0xFF, 0xFF, 0xFF, 0xFE, // 逆方向 noData
 	}
-	if _, _, noData, err := DecodeCumulative1Min(edt, jst); err != nil || !noData {
-		t.Fatalf("0xFFFFFFFE fwd should be noData, got noData=%v err=%v", noData, err)
+	c, err := DecodeCumulative1Min(edt, jst)
+	if err != nil || !c.FwdNoData || !c.RevNoData {
+		t.Fatalf("0xFFFFFFFE should be noData, got fwd=%v rev=%v err=%v", c.FwdNoData, c.RevNoData, err)
 	}
 }
 
 func TestDecodeCumulative1MinWrongLength(t *testing.T) {
 	// 旧実装が誤って想定していた 8byte は弾く
-	if _, _, _, err := DecodeCumulative1Min(make([]byte, 8), time.UTC); err == nil {
+	if _, err := DecodeCumulative1Min(make([]byte, 8), time.UTC); err == nil {
 		t.Fatal("8 bytes should error (spec is 15 bytes)")
 	}
 }
