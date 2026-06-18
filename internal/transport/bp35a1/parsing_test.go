@@ -24,6 +24,26 @@ func TestHandleEventLifetimeExpireClearsTx(t *testing.T) {
 	}
 }
 
+func TestHandleEventLifetimeExpireSignalsReconnectEvenWhenEventsFull(t *testing.T) {
+	d := newTestDevice()
+	d.sessionEst.Store(true)
+	// eventsチャネルを満杯にする
+	for i := 0; i < cap(d.events); i++ {
+		d.events <- skEvent{code: evUDPSendDone}
+	}
+	d.feed([]byte("EVENT 29 FE80::2\r\n")) // セッション期限切れ
+
+	if d.sessionEst.Load() {
+		t.Fatal("sessionEst should be cleared on EVENT 29")
+	}
+	// events経由ではなくreconnectChで再接続が伝わること
+	select {
+	case <-d.reconnectCh:
+	default:
+		t.Fatal("reconnect must be signaled even when events channel is full")
+	}
+}
+
 func TestHandleEventTxLimit(t *testing.T) {
 	d := newTestDevice()                   // txAllowed=true(既定)
 	d.feed([]byte("EVENT 32 FE80::2\r\n")) // ARIB 送信総和時間制限 発動

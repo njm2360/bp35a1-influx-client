@@ -147,6 +147,8 @@ type Device struct {
 	epans     chan Epan
 	rxudp     chan []byte
 
+	reconnectCh chan struct{}
+
 	epan     Epan
 	epanSeen map[string]bool
 
@@ -193,19 +195,20 @@ func Open(ctx context.Context, opts Options) (*Device, error) {
 
 	dctx, cancel := context.WithCancel(context.Background())
 	d := &Device{
-		port:      port,
-		log:       opts.Logger,
-		ctx:       dctx,
-		cancel:    cancel,
-		newline:   crlf,
-		state:     stateNormal,
-		epanCache: opts.EpanCache,
-		results:   make(chan string, 8),
-		responses: make(chan string, 32),
-		events:    make(chan skEvent, 16),
-		epans:     make(chan Epan, 4),
-		rxudp:     make(chan []byte, 8),
-		closed:    make(chan struct{}),
+		port:        port,
+		log:         opts.Logger,
+		ctx:         dctx,
+		cancel:      cancel,
+		newline:     crlf,
+		state:       stateNormal,
+		epanCache:   opts.EpanCache,
+		results:     make(chan string, 8),
+		responses:   make(chan string, 32),
+		events:      make(chan skEvent, 16),
+		epans:       make(chan Epan, 4),
+		rxudp:       make(chan []byte, 8),
+		reconnectCh: make(chan struct{}, 1),
+		closed:      make(chan struct{}),
 	}
 	d.reconnect = d.reestablish
 	d.txAllowed.Store(true)
@@ -249,6 +252,13 @@ func (d *Device) setup(ctx context.Context, opts Options, baud int) error {
 	return nil
 }
 
+func (d *Device) signalReconnect() {
+	select {
+	case d.reconnectCh <- struct{}{}:
+	default:
+	}
+}
+
 func (d *Device) manage(epan Epan) {
 	for {
 		select {
@@ -256,16 +266,15 @@ func (d *Device) manage(epan Epan) {
 			return
 		case <-d.closed:
 			return
-		case ev := <-d.events:
-			if ev.code == evLifetimeExpire {
-				d.log.Warn("PANA session expired; reconnecting")
-				d.sessionEst.Store(false)
-				next, ok := d.reconnect(epan)
-				if !ok {
-					return
-				}
-				epan = next
+		case <-d.reconnectCh:
+			d.log.Warn("PANA session expired; reconnecting")
+			d.sessionEst.Store(false)
+			next, ok := d.reconnect(epan)
+			if !ok {
+				return
 			}
+			epan = next
+		case <-d.events:
 		}
 	}
 }

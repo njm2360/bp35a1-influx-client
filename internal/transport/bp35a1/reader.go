@@ -172,6 +172,7 @@ func (d *Device) handleEvent(line string) {
 		d.sessionEst.Store(true)
 	case evLifetimeExpire:
 		d.sessionEst.Store(false)
+		d.signalReconnect()
 	case evTxLimitOn:
 		d.log.Warn("ARIB transmit-time limit engaged; transmissions blocked")
 		d.txAllowed.Store(false)

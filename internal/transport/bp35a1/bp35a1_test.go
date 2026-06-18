@@ -11,17 +11,18 @@ import (
 func newTestDevice() *Device {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Device{
-		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		ctx:       ctx,
-		cancel:    cancel,
-		newline:   "\r\n",
-		state:     stateNormal,
-		results:   make(chan string, 8),
-		responses: make(chan string, 32),
-		events:    make(chan skEvent, 16),
-		epans:     make(chan Epan, 4),
-		rxudp:     make(chan []byte, 8),
-		closed:    make(chan struct{}),
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ctx:         ctx,
+		cancel:      cancel,
+		newline:     "\r\n",
+		state:       stateNormal,
+		results:     make(chan string, 8),
+		responses:   make(chan string, 32),
+		events:      make(chan skEvent, 16),
+		epans:       make(chan Epan, 4),
+		rxudp:       make(chan []byte, 8),
+		reconnectCh: make(chan struct{}, 1),
+		closed:      make(chan struct{}),
 	}
 	d.txAllowed.Store(true)
 	return d
