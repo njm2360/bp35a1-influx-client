@@ -170,7 +170,7 @@ func (d *Device) handleEvent(line string) {
 	switch int(code) {
 	case evPANAConnectOK:
 		d.sessionEst.Store(true)
-	case evLifetimeExpire:
+	case evSessionEnd, evSessionEndOK, evSessionEndTO, evLifetimeExpire:
 		d.sessionEst.Store(false)
 		d.signalReconnect()
 	case evTxLimitOn:

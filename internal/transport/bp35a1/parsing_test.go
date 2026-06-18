@@ -44,6 +44,27 @@ func TestHandleEventLifetimeExpireSignalsReconnectEvenWhenEventsFull(t *testing.
 	}
 }
 
+func TestHandleEventSessionEndTriggersReconnect(t *testing.T) {
+	// 0x26(相手都合の終了要求)/0x27(終了成功)/0x28(終了タイムアウト)/0x29(期限切れ)
+	// はいずれもセッション喪失となるためsessionEstをクリアし再接続を促す
+	for _, ev := range []string{"26", "27", "28", "29"} {
+		t.Run("EVENT_"+ev, func(t *testing.T) {
+			d := newTestDevice()
+			d.sessionEst.Store(true)
+			d.feed([]byte("EVENT " + ev + " FE80::2\r\n"))
+
+			if d.sessionEst.Load() {
+				t.Fatalf("EVENT %s should clear sessionEst", ev)
+			}
+			select {
+			case <-d.reconnectCh:
+			default:
+				t.Fatalf("EVENT %s should signal reconnect", ev)
+			}
+		})
+	}
+}
+
 func TestHandleEventTxLimit(t *testing.T) {
 	d := newTestDevice()                   // txAllowed=true(既定)
 	d.feed([]byte("EVENT 32 FE80::2\r\n")) // ARIB 送信総和時間制限 発動
