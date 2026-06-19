@@ -11,6 +11,9 @@ import (
 // readLoop の連続読み取りエラーがこの回数に達したらポートが死んだと判断して終了する。
 const maxConsecutiveReadErrors = 10
 
+// 1行の最大長。これを超えて改行が来ない場合はゴミとみなして破棄する
+const maxLineBytes = 8192
+
 func (d *Device) readLoop() {
 	defer d.Close()
 
@@ -72,6 +75,11 @@ func (d *Device) feed(chunk []byte) {
 			d.processLine(line)
 		}
 		d.bufMu.Lock()
+	}
+
+	if len(d.buf) > maxLineBytes {
+		d.log.Warn("rx buffer overflow without newline; discarding", "bytes", len(d.buf))
+		d.buf = nil
 	}
 	d.bufMu.Unlock()
 }
