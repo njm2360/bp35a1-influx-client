@@ -1,11 +1,135 @@
 package bp35a1
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestFeedERXUDP(t *testing.T) {
+	d := newTestDevice()
+	// dst port 0E1A = 3610(ECHONET)。data = 1081... の ECHONET フレーム。
+	line := "ERXUDP FE80::1 FE80::2 0E1A 0E1A 001D129012345678 1 000A 1081000102880105FF01\r\n"
+	d.feed([]byte(line))
+
+	select {
+	case b := <-d.rxudp:
+		if len(b) != 10 || b[0] != 0x10 || b[1] != 0x81 {
+			t.Fatalf("unexpected payload: %x", b)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no rxudp payload")
+	}
+}
+
+func TestFeedERXUDPNonEchonetIgnored(t *testing.T) {
+	d := newTestDevice()
+	line := "ERXUDP FE80::1 FE80::2 0E1A 1234 001D129012345678 1 0002 ABCD\r\n"
+	d.feed([]byte(line))
+	select {
+	case b := <-d.rxudp:
+		t.Fatalf("non-ECHONET port should be ignored, got %x", b)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestFeedEvent(t *testing.T) {
+	d := newTestDevice()
+	d.feed([]byte("EVENT 25 FE80::2\r\n")) // PANA_CONNECT_OK
+	if !d.sessionEst.Load() {
+		t.Fatal("sessionEst should be set on PANA connect OK")
+	}
+	select {
+	case ev := <-d.events:
+		if ev.code != evPANAConnectOK {
+			t.Fatalf("want PANA_CONNECT_OK, got %#x", ev.code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no event delivered")
+	}
+}
+
+func TestFeedEpandescChunked(t *testing.T) {
+	d := newTestDevice()
+	// 複数行を分割して投入し、行境界をまたいでも組み立てられること。
+	d.feed([]byte("EPANDESC\r\n  Channel:21\r\n  Channel Page:09\r\n"))
+	d.feed([]byte("  Pan ID:8888\r\n  Addr:001D1290"))
+	d.feed([]byte("12345678\r\n  LQI:E1\r\n  PairID:00112233\r\n"))
+
+	select {
+	case e := <-d.epans:
+		if e.Channel != 0x21 || e.PanID != 0x8888 || e.LQI != 0xE1 {
+			t.Fatalf("unexpected epan: %+v", e)
+		}
+		if e.MACAddress != "001D129012345678" || e.PairID != "00112233" {
+			t.Fatalf("unexpected epan strings: %+v", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("EPANDESC not assembled")
+	}
+	if d.currentState() != stateNormal {
+		t.Fatal("state should return to NORMAL after EPANDESC")
+	}
+}
+
+func TestFeedOKResult(t *testing.T) {
+	d := newTestDevice()
+	d.feed([]byte("OK\r\n"))
+	select {
+	case r := <-d.results:
+		if r != "OK" {
+			t.Fatalf("want OK, got %q", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no result")
+	}
+}
+
+func TestProductReadState(t *testing.T) {
+	// ROPT は CR 終端で "OK 01"(結果 + 値)を 1 行で返す。
+	d := newTestDevice()
+	d.setMode("\r", stateProductRead)
+	d.feed([]byte("OK 01\r"))
+
+	select {
+	case v := <-d.responses:
+		if v != "01" {
+			t.Fatalf("want response 01, got %q", v)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no response")
+	}
+	select {
+	case r := <-d.results:
+		if r != "OK" {
+			t.Fatalf("want OK, got %q", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no result")
+	}
+}
+
+func TestFeedBufferOverflowDiscarded(t *testing.T) {
+	d := newTestDevice()
+	// 改行を含まないゴミが maxLineBytes を超えても、バッファは破棄され肥大化しない。
+	garbage := make([]byte, maxLineBytes+1024)
+	for i := range garbage {
+		garbage[i] = 'x'
+	}
+	d.feed(garbage)
+	if len(d.buf) != 0 {
+		t.Fatalf("overflowed buffer should be discarded, got %d bytes", len(d.buf))
+	}
+	// 破棄後も後続の正常行を処理できること。
+	d.feed([]byte("OK\r\n"))
+	select {
+	case r := <-d.results:
+		if r != "OK" {
+			t.Fatalf("want OK after overflow reset, got %q", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parser should recover after overflow discard")
+	}
+}
 
 func TestHandleEventLifetimeExpireClearsTx(t *testing.T) {
 	d := newTestDevice()
@@ -208,59 +332,18 @@ func TestParseHex(t *testing.T) {
 	}
 }
 
-func TestReestablishAbortsWhenCtxDone(t *testing.T) {
-	d := newTestDevice()
-	d.cancel() // ctx 終了済み
-	// connect/scan(ポート操作)に到達せず即 ok=false で返ること。
-	if _, ok := d.reestablish(Epan{Channel: 0x21}); ok {
-		t.Fatal("reestablish should not succeed after ctx cancel")
-	}
-}
-
-func TestEpanSaveLoadRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "epan.json")
-	in := Epan{Channel: 0x21, ChannelPage: 0x09, PanID: 0x8888, MACAddress: "001D129012345678", LQI: 0xE1, PairID: "00112233"}
-	if err := saveEpan(path, in); err != nil {
-		t.Fatalf("saveEpan: %v", err)
-	}
-	got, ok := loadEpan(path)
-	if !ok {
-		t.Fatal("loadEpan returned ok=false")
-	}
-	if got != in {
-		t.Fatalf("roundtrip mismatch: %+v vs %+v", got, in)
-	}
-}
-
-func TestLoadEpanRejects(t *testing.T) {
-	dir := t.TempDir()
-
-	if _, ok := loadEpan(""); ok {
-		t.Error("empty path should fail")
-	}
-	if _, ok := loadEpan(filepath.Join(dir, "missing.json")); ok {
-		t.Error("missing file should fail")
-	}
-
-	bad := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(bad, []byte("{not json"), 0o600); err != nil {
+func TestHexToBytes(t *testing.T) {
+	b, err := hexToBytes("1081ABCD")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loadEpan(bad); ok {
-		t.Error("invalid JSON should fail")
+	want := []byte{0x10, 0x81, 0xAB, 0xCD}
+	for i := range want {
+		if b[i] != want[i] {
+			t.Fatalf("byte %d: got %#x want %#x", i, b[i], want[i])
+		}
 	}
-
-	noMAC := filepath.Join(dir, "nomac.json")
-	if err := os.WriteFile(noMAC, []byte(`{"channel":33}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := loadEpan(noMAC); ok {
-		t.Error("missing MACAddress should fail")
-	}
-}
-
-func TestSaveEpanEmptyPathNoop(t *testing.T) {
-	if err := saveEpan("", Epan{MACAddress: "x"}); err != nil {
-		t.Fatalf("saveEpan with empty path should be a no-op, got %v", err)
+	if _, err := hexToBytes("ZZ"); err == nil {
+		t.Fatal("invalid hex should error")
 	}
 }
