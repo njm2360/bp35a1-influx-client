@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sync"
 
@@ -35,9 +36,7 @@ func (w *Writer) write(measurement string, t any, fields map[string]any) error {
 		"meter":       w.meter,
 		"time":        t,
 	}
-	for k, v := range fields {
-		rec[k] = v
-	}
+	maps.Copy(rec, fields)
 	if err := w.enc.Encode(rec); err != nil {
 		return fmt.Errorf("stdout: encode %s: %w", measurement, err)
 	}

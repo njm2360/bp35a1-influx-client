@@ -2,6 +2,7 @@ package echonet
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 )
@@ -89,12 +90,7 @@ func MeterEPCSettable(epc byte) (string, bool) {
 }
 
 func SettableMeterEPCs() []byte {
-	epcs := make([]byte, 0, len(meterSetProps))
-	for epc := range meterSetProps {
-		epcs = append(epcs, epc)
-	}
-	slices.Sort(epcs)
-	return epcs
+	return slices.Sorted(maps.Keys(meterSetProps))
 }
 
 func DecodeMeterProp(epc byte, edt []byte, loc *time.Location) (value any, name string, ok bool, err error) {
@@ -120,10 +116,5 @@ func MeterEPCSupported(epc byte) bool {
 }
 
 func MeterEPCs() []byte {
-	epcs := make([]byte, 0, len(meterProps))
-	for epc := range meterProps {
-		epcs = append(epcs, epc)
-	}
-	slices.Sort(epcs)
-	return epcs
+	return slices.Sorted(maps.Keys(meterProps))
 }

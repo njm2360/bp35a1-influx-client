@@ -153,13 +153,11 @@ func TestRequestsSerialized(t *testing.T) {
 	const n = 3
 	var wg sync.WaitGroup
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			gctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			_, _ = c.Get(gctx, echonet.EPCInstantPower)
-		}()
+		})
 	}
 	// 直列化されていれば、同時に待機中の responder は常に1つだけ。
 	for range n {
