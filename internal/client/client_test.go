@@ -175,6 +175,71 @@ func TestRequestsSerialized(t *testing.T) {
 	}
 }
 
+func TestSetCCorrelates(t *testing.T) {
+	tr := newFakeTransport(func(req echonet.Frame) []echonet.Frame {
+		if req.ESV != echonet.ESVSetC {
+			return nil
+		}
+		return []echonet.Frame{{
+			TID: req.TID, SEOJ: echonet.EOJMeter, DEOJ: echonet.EOJController,
+			ESV:   echonet.ESVSetRes,
+			Props: []echonet.Property{{EPC: echonet.EPCHistoryDay1}},
+		}}
+	})
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+
+	gctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	resp, err := c.SetC(gctx, echonet.Property{EPC: echonet.EPCHistoryDay1, EDT: []byte{0x01}})
+	if err != nil {
+		t.Fatalf("SetC: %v", err)
+	}
+	if resp.ESV != echonet.ESVSetRes {
+		t.Fatalf("want SetRes, got %#x", byte(resp.ESV))
+	}
+}
+
+// TestUnsupportedRequestGetsSNA はメータ発の要求(ここでは Get)に対し
+// コントローラが SNA を返すこと(dispatch の IsRequest 経路 + sendSNA)を確認する。
+func TestUnsupportedRequestGetsSNA(t *testing.T) {
+	var mu sync.Mutex
+	var sawSNA bool
+	tr := newFakeTransport(func(req echonet.Frame) []echonet.Frame {
+		if req.ESV == echonet.ESVGetSNA {
+			mu.Lock()
+			sawSNA = true
+			mu.Unlock()
+		}
+		return nil
+	})
+	c := New(tr, testLogger())
+	ctx := t.Context()
+	go c.Run(ctx)
+
+	tr.inject(echonet.Frame{
+		TID: 0x1234, SEOJ: echonet.EOJMeter, DEOJ: echonet.EOJController,
+		ESV:   echonet.ESVGet,
+		Props: []echonet.Property{{EPC: echonet.EPCInstantPower}},
+	})
+
+	deadline := time.After(time.Second)
+	for {
+		mu.Lock()
+		ok := sawSNA
+		mu.Unlock()
+		if ok {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("Get_SNA was not sent for unsupported request")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func TestINFCSendsResponseAndNotifies(t *testing.T) {
 	var mu sync.Mutex
 	var sawINFCRes bool

@@ -92,3 +92,18 @@ func TestDecodePropertyMapBitmap(t *testing.T) {
 		t.Fatal("truncated bitmap should error")
 	}
 }
+
+func TestDecodeInstallLocation(t *testing.T) {
+	if code, err := DecodeInstallLocation([]byte{0x0B, 0xAA}); err != nil || code != 0x0B {
+		t.Fatalf("want 0x0B, got 0x%02X err=%v", code, err)
+	}
+	if _, err := DecodeInstallLocation(nil); err == nil {
+		t.Fatal("empty install location should error")
+	}
+}
+
+func TestDecodeCurrentDateWrongLength(t *testing.T) {
+	if _, _, _, err := DecodeCurrentDate([]byte{0x07, 0xEA}); err == nil {
+		t.Fatal("short date should error")
+	}
+}

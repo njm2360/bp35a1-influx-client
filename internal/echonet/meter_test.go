@@ -216,3 +216,25 @@ func TestDecodeHistoryCollectSpec(t *testing.T) {
 		t.Fatal("wrong length should error")
 	}
 }
+
+func TestDecodeCumulativeEnergyEdges(t *testing.T) {
+	if _, err := DecodeCumulativeEnergy([]byte{0x00, 0x01}); err == nil {
+		t.Fatal("wrong length should error")
+	}
+	e, err := DecodeCumulativeEnergy([]byte{0xFF, 0xFF, 0xFF, 0xFE})
+	if err != nil || !e.NoData {
+		t.Fatalf("0xFFFFFFFE want NoData, got %+v err=%v", e, err)
+	}
+}
+
+func TestBRouteIDMakerCodeShort(t *testing.T) {
+	if mc := (BRouteID{Raw: []byte{0x01, 0x02}}).MakerCode(); mc != nil {
+		t.Fatalf("short raw should yield nil maker code, got %x", mc)
+	}
+	full := make([]byte, 16)
+	full[1], full[2], full[3] = 0xAA, 0xBB, 0xCC
+	mc := (BRouteID{Raw: full}).MakerCode()
+	if len(mc) != 3 || mc[0] != 0xAA || mc[2] != 0xCC {
+		t.Fatalf("maker code want AABBCC, got %x", mc)
+	}
+}

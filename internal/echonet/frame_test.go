@@ -169,3 +169,16 @@ func TestDecodeMultiPropVaryingEDT(t *testing.T) {
 		t.Fatalf("EDT lengths wrong: %+v", got.Props)
 	}
 }
+
+func TestFrameEDTLookup(t *testing.T) {
+	f := Frame{Props: []Property{
+		{EPC: 0x80, EDT: []byte{0x30}},
+		{EPC: EPCInstantPower, EDT: []byte{0x00, 0x00, 0x02, 0x00}},
+	}}
+	if edt, ok := f.EDT(EPCInstantPower); !ok || len(edt) != 4 {
+		t.Fatalf("EDT(0xE7) want 4 bytes, got ok=%v edt=%x", ok, edt)
+	}
+	if edt, ok := f.EDT(EPCFaultStatus); ok || edt != nil {
+		t.Fatalf("EDT(missing) want nil,false, got ok=%v edt=%x", ok, edt)
+	}
+}

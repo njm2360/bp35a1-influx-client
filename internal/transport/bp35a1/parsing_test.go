@@ -169,6 +169,36 @@ func TestSKLL64Fail(t *testing.T) {
 	}
 }
 
+func TestEpandescResetOnUnexpectedLine(t *testing.T) {
+	d := newTestDevice()
+	d.setState(stateEpandesc)
+	// コロンを含まない想定外の行 → パーサをリセットし通常処理にフォールバック。
+	d.feed([]byte("UNEXPECTED\r\n"))
+	if d.currentState() != stateNormal {
+		t.Fatalf("state should reset to normal, got %v", d.currentState())
+	}
+	select {
+	case r := <-d.responses:
+		if r != "UNEXPECTED" {
+			t.Fatalf("want fallback line on responses, got %q", r)
+		}
+	default:
+		t.Fatal("unexpected line should be reprocessed as normal")
+	}
+}
+
+func TestClearBuffer(t *testing.T) {
+	d := newTestDevice()
+	d.feed([]byte("partial-without-newline")) // 改行なし → バッファに滞留
+	if len(d.buf) == 0 {
+		t.Fatal("buffer should hold partial line")
+	}
+	d.clearBuffer()
+	if len(d.buf) != 0 {
+		t.Fatalf("clearBuffer should empty the buffer, got %d bytes", len(d.buf))
+	}
+}
+
 func TestParseHex(t *testing.T) {
 	cases := map[string]int{"21": 0x21, " FF ": 0xFF, "8888": 0x8888, "ZZ": 0, "": 0}
 	for in, want := range cases {

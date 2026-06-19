@@ -215,3 +215,59 @@ func TestDecodeMeterProp(t *testing.T) {
 		t.Fatal("unknown EPC should report ok=false")
 	}
 }
+
+// TestDecodeMeterPropExtra は TestDecodeMeterProp が触れていないルート
+// (decodeUnit/decodeHistoryDay/decodeCurrent)を経由させる。
+func TestDecodeMeterPropExtra(t *testing.T) {
+	jst := time.FixedZone("JST", 9*3600)
+
+	// 0xE1 積算電力量単位 → decodeUnit → float64
+	if v, _, ok, err := DecodeMeterProp(EPCUnit, []byte{0x01}, jst); !ok || err != nil {
+		t.Fatalf("0xE1 decode failed: ok=%v err=%v", ok, err)
+	} else if u, isType := v.(float64); !isType || u != 0.1 {
+		t.Fatalf("0xE1 want 0.1, got %T %v", v, v)
+	}
+	if _, _, _, err := DecodeMeterProp(EPCUnit, []byte{0x01, 0x02}, jst); err == nil {
+		t.Fatal("0xE1 wrong length should error")
+	}
+
+	// 0xE5 積算履歴収集日1 → decodeHistoryDay
+	if v, _, ok, err := DecodeMeterProp(EPCHistoryDay1, []byte{0xFF}, jst); !ok || err != nil {
+		t.Fatalf("0xE5 decode failed: ok=%v err=%v", ok, err)
+	} else if d, isType := v.(struct {
+		Day   int
+		Unset bool
+	}); !isType || !d.Unset {
+		t.Fatalf("0xE5 0xFF want Unset=true, got %T %v", v, v)
+	}
+
+	// 0xE8 瞬時電流計測値 → decodeCurrent → InstantCurrent
+	if v, _, ok, err := DecodeMeterProp(EPCInstantCurrent, []byte{0x00, 0x19, 0x7F, 0xFE}, jst); !ok || err != nil {
+		t.Fatalf("0xE8 decode failed: ok=%v err=%v", ok, err)
+	} else if c, isType := v.(InstantCurrent); !isType || c.R != 2.5 || !c.TNoData {
+		t.Fatalf("0xE8 want R=2.5 TNoData, got %T %v", v, v)
+	}
+
+	// デコードエラーは err として伝播すること(ok=true, err!=nil)。
+	if _, _, ok, err := DecodeMeterProp(EPCInstantCurrent, []byte{0x00}, jst); !ok || err == nil {
+		t.Fatalf("0xE8 short edt: want ok=true err!=nil, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestMeterEPCsSortedAndNameLookup(t *testing.T) {
+	epcs := MeterEPCs()
+	if len(epcs) == 0 {
+		t.Fatal("MeterEPCs returned empty")
+	}
+	for i := 1; i < len(epcs); i++ {
+		if epcs[i-1] >= epcs[i] {
+			t.Fatalf("MeterEPCs not strictly sorted: %x", epcs)
+		}
+	}
+	if name, ok := MeterEPCName(EPCInstantPower); !ok || name == "" {
+		t.Fatalf("0xE7 name lookup failed: ok=%v name=%q", ok, name)
+	}
+	if _, ok := MeterEPCName(0x00); ok {
+		t.Fatal("unknown EPC name lookup should report ok=false")
+	}
+}

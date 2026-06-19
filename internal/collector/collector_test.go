@@ -264,6 +264,71 @@ func TestHandleINFScheduled30(t *testing.T) {
 	}
 }
 
+func TestToStatus(t *testing.T) {
+	now := time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC)
+	if st, err := toStatus([]byte{0x41}, now); err != nil || !st.Fault {
+		t.Fatalf("0x41 want fault, got %+v err=%v", st, err)
+	}
+	if st, err := toStatus([]byte{0x42}, now); err != nil || st.Fault {
+		t.Fatalf("0x42 want no fault, got %+v err=%v", st, err)
+	}
+	if _, err := toStatus([]byte{0x41, 0x00}, now); err == nil {
+		t.Fatal("wrong length should error")
+	}
+}
+
+func TestPollStatus(t *testing.T) {
+	s := &fakeELClient{edt: map[byte][]byte{echonet.EPCFaultStatus: {0x42}}}
+	w := &fakeWriter{}
+	c := newTestCollector(s, w)
+	if err := c.pollStatus(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.statuses) != 1 || w.statuses[0].Fault {
+		t.Fatalf("unexpected status writes: %+v", w.statuses)
+	}
+
+	// EPC が返らない場合は欠落エラー。
+	empty := newTestCollector(&fakeELClient{edt: map[byte][]byte{}}, &fakeWriter{})
+	if err := empty.pollStatus(context.Background()); err == nil {
+		t.Fatal("missing 0x88 should error")
+	}
+}
+
+func TestPollEnergy30(t *testing.T) {
+	s := &fakeELClient{edt: map[byte][]byte{
+		echonet.EPCScheduledFwd: {0x07, 0xEA, 0x06, 0x0F, 0x0A, 0x1E, 0x00, 0x00, 0x01, 0x86, 0xA0}, // 100000
+	}}
+	w := &fakeWriter{}
+	c := newTestCollector(s, w)
+	c.params.Store(&model.MeterParams{Coefficient: 1, UnitKWh: 0.1})
+	if err := c.pollEnergy30(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.min30) != 1 || w.min30[0].KWh != 10000 {
+		t.Fatalf("unexpected energy30: %+v", w.min30)
+	}
+
+	// EPC が返らない場合は欠落エラー。
+	empty := newTestCollector(&fakeELClient{edt: map[byte][]byte{}}, &fakeWriter{})
+	if err := empty.pollEnergy30(context.Background()); err == nil {
+		t.Fatal("missing 0xEA should error")
+	}
+}
+
+func TestHandleINFFault(t *testing.T) {
+	s := &fakeELClient{}
+	w := &fakeWriter{}
+	c := newTestCollector(s, w)
+	c.handleINFFrame(context.Background(), echonet.Frame{
+		ESV:   echonet.ESVINF,
+		Props: []echonet.Property{{EPC: echonet.EPCFaultStatus, EDT: []byte{0x41}}},
+	})
+	if len(w.statuses) != 1 || !w.statuses[0].Fault {
+		t.Fatalf("INF fault status not written: %+v", w.statuses)
+	}
+}
+
 func TestNextMinuteMark(t *testing.T) {
 	now := time.Date(2026, 6, 15, 10, 20, 0, 0, time.UTC)
 	got := nextMinuteMark(now, []int{5, 35})
