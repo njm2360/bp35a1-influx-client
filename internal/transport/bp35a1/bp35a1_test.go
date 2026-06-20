@@ -16,8 +16,10 @@ import (
 
 func newTestDevice() *Device {
 	ctx, cancel := context.WithCancel(context.Background())
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	d := &Device{
-		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		log:         log,
+		serialLog:   log,
 		ctx:         ctx,
 		cancel:      cancel,
 		newline:     "\r\n",

@@ -137,8 +137,9 @@ type skEvent struct {
 }
 
 type Device struct {
-	port serial.Port
-	log  *slog.Logger
+	port      serial.Port
+	log       *slog.Logger // SK stack
+	serialLog *slog.Logger // Serial
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -210,7 +211,8 @@ func Open(ctx context.Context, opts Options) (*Device, error) {
 	dctx, cancel := context.WithCancel(context.Background())
 	d := &Device{
 		port:        port,
-		log:         opts.Logger,
+		log:         opts.Logger.With("component", "transport", "layer", "sk"),
+		serialLog:   opts.Logger.With("component", "transport", "layer", "serial"),
 		ctx:         dctx,
 		cancel:      cancel,
 		newline:     crlf,

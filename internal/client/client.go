@@ -38,7 +38,7 @@ type Client struct {
 func New(tr transport.Transport, log *slog.Logger) *Client {
 	return &Client{
 		tr:            tr,
-		log:           log,
+		log:           log.With("component", "echonet"),
 		reqSem:        make(chan struct{}, 1),
 		pending:       make(map[uint16]chan echonet.Frame),
 		infCh:         make(chan echonet.Frame, infBuffer),

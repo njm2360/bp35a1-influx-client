@@ -35,7 +35,7 @@ func (c *Collector) supportsEPC(epc byte) bool {
 }
 
 func New(cli Client, out storage.Writer, cfg config.Config, log *slog.Logger) *Collector {
-	return &Collector{cli: cli, out: out, cfg: cfg, log: log}
+	return &Collector{cli: cli, out: out, cfg: cfg, log: log.With("component", "collector")}
 }
 
 func (c *Collector) Run(ctx context.Context) error {
