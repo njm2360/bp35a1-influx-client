@@ -249,6 +249,11 @@ func (d *Device) Recv(ctx context.Context) ([]byte, error) {
 	}
 }
 
+func (d *Device) Reconnect() {
+	d.sessionEst.Store(false)
+	d.signalReconnect()
+}
+
 func (d *Device) Close() error {
 	d.closeOnce.Do(func() {
 		close(d.closed)

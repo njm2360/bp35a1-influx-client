@@ -17,6 +17,9 @@ type fakeTransport struct {
 	recvCh    chan []byte
 	closeOnce sync.Once
 	closed    chan struct{}
+
+	reconnectMu sync.Mutex
+	reconnects  int
 }
 
 func newFakeTransport(responder func(echonet.Frame) []echonet.Frame) *fakeTransport {
@@ -49,6 +52,18 @@ func (f *fakeTransport) Recv(ctx context.Context) ([]byte, error) {
 	case b := <-f.recvCh:
 		return b, nil
 	}
+}
+
+func (f *fakeTransport) Reconnect() {
+	f.reconnectMu.Lock()
+	f.reconnects++
+	f.reconnectMu.Unlock()
+}
+
+func (f *fakeTransport) reconnectCount() int {
+	f.reconnectMu.Lock()
+	defer f.reconnectMu.Unlock()
+	return f.reconnects
 }
 
 func (f *fakeTransport) Close() error {
@@ -170,6 +185,46 @@ func TestRequestsSerialized(t *testing.T) {
 	mu.Unlock()
 	if got != 1 {
 		t.Fatalf("requests not serialized: max in-flight=%d, want 1", got)
+	}
+}
+
+func TestDeadLinkWatchdog(t *testing.T) {
+	tr := newFakeTransport(func(echonet.Frame) []echonet.Frame { return nil })
+	c := New(tr, testLogger())
+
+	// 単発の無応答ではタイマ起動のみ。発火しない。
+	c.recordTimeout()
+	if got := tr.reconnectCount(); got != 0 {
+		t.Fatalf("single timeout triggered reconnect: got %d", got)
+	}
+
+	// 連続して失敗してもまだ deadLink 未満なら発火しない(バースト耐性)
+	c.recordTimeout()
+	c.recordTimeout()
+	if got := tr.reconnectCount(); got != 0 {
+		t.Fatalf("reconnect before deadLink elapsed: got %d", got)
+	}
+
+	// 最初の無応答から deadLink を超えた状態を作る。
+	c.wdMu.Lock()
+	c.firstFailAt = time.Now().Add(-c.deadLinkAfter - time.Second)
+	c.wdMu.Unlock()
+	c.recordTimeout()
+	if got := tr.reconnectCount(); got != 1 {
+		t.Fatalf("expected reconnect after deadLink elapsed, got %d", got)
+	}
+
+	// 発火後はウィンドウが再スタートし、次の単発無応答では再発火しない。
+	c.recordTimeout()
+	if got := tr.reconnectCount(); got != 1 {
+		t.Fatalf("reconnect re-fired within window: got %d", got)
+	}
+
+	// 成功(SNA 含む)でタイマがリセットされ、その後の単発無応答でも発火しない。
+	c.recordSuccess()
+	c.recordTimeout()
+	if got := tr.reconnectCount(); got != 1 {
+		t.Fatalf("reconnect fired after success reset: got %d", got)
 	}
 }
 

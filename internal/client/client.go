@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,6 +14,8 @@ import (
 )
 
 const infBuffer = 32
+
+const defaultDeadLinkAfter = 3 * time.Minute
 
 type Client struct {
 	tr  transport.Transport
@@ -26,15 +29,20 @@ type Client struct {
 	pending map[uint16]chan echonet.Frame
 
 	infCh chan echonet.Frame
+
+	wdMu          sync.Mutex
+	firstFailAt   time.Time
+	deadLinkAfter time.Duration
 }
 
 func New(tr transport.Transport, log *slog.Logger) *Client {
 	return &Client{
-		tr:      tr,
-		log:     log,
-		reqSem:  make(chan struct{}, 1),
-		pending: make(map[uint16]chan echonet.Frame),
-		infCh:   make(chan echonet.Frame, infBuffer),
+		tr:            tr,
+		log:           log,
+		reqSem:        make(chan struct{}, 1),
+		pending:       make(map[uint16]chan echonet.Frame),
+		infCh:         make(chan echonet.Frame, infBuffer),
+		deadLinkAfter: defaultDeadLinkAfter,
 	}
 }
 
@@ -80,8 +88,12 @@ func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.P
 
 	select {
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			c.recordTimeout()
+		}
 		return echonet.Frame{}, ctx.Err()
 	case resp := <-ch:
+		c.recordSuccess()
 		elapsed := time.Since(start)
 		switch resp.ESV {
 		case echonet.ESVGetSNA, echonet.ESVSetCSNA:
@@ -91,6 +103,32 @@ func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.P
 		c.log.Debug("request ok", "tid", tid, "elapsed", elapsed)
 		return resp, nil
 	}
+}
+
+func (c *Client) recordSuccess() {
+	c.wdMu.Lock()
+	c.firstFailAt = time.Time{}
+	c.wdMu.Unlock()
+}
+
+func (c *Client) recordTimeout() {
+	now := time.Now()
+	c.wdMu.Lock()
+	if c.firstFailAt.IsZero() {
+		c.firstFailAt = now
+		c.wdMu.Unlock()
+		return
+	}
+	dead := now.Sub(c.firstFailAt)
+	if dead < c.deadLinkAfter {
+		c.wdMu.Unlock()
+		return
+	}
+	c.firstFailAt = now
+	c.wdMu.Unlock()
+
+	c.log.Warn("link unresponsive; forcing reconnect", "dead", dead)
+	c.tr.Reconnect()
 }
 
 func (c *Client) Run(ctx context.Context) error {
