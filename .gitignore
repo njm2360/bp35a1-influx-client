@@ -32,3 +32,5 @@ go.work.sum
 # .vscode/
 
 epan.json
+
+bin/
