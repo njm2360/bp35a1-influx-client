@@ -11,23 +11,20 @@ import (
 	"go.bug.st/serial"
 )
 
-func (d *Device) setup(ctx context.Context, opts Options, baud int) error {
-	if err := d.initModule(ctx, opts, baud); err != nil {
+func (d *Device) setup(ctx context.Context) error {
+	if err := d.initModule(ctx); err != nil {
 		return err
 	}
 
-	epan, ok := loadEpan(opts.EpanCache)
+	epan, ok := loadEpan(d.epanCache)
 	if ok {
 		d.log.Info("using cached EPAN", "channel", epan.Channel, "pan_id", epan.PanID)
 	} else {
-		scanned, err := d.scan(ctx, 6)
+		scanned, err := d.scanAndCache(ctx)
 		if err != nil {
 			return err
 		}
-		epan = *scanned
-		if err := saveEpan(opts.EpanCache, epan); err != nil {
-			d.log.Warn("failed to cache EPAN", "err", err)
-		}
+		epan = scanned
 	}
 
 	ip, err := d.connect(ctx, epan)
@@ -68,36 +65,63 @@ func (d *Device) manage(epan Epan) {
 	}
 }
 
-func (d *Device) reestablish(epan Epan) (Epan, bool) {
-	const maxBackoff = 5 * time.Minute
-	const rescanAfterFailures = 5
+const (
+	rescanAfterFailures = 5
+	resetAfterFailures  = 20
+)
 
-	backoff := time.Second
-	for attempt := 1; ; attempt++ {
+type recoveryStep int
+
+const (
+	stepNone recoveryStep = iota
+	stepRescan
+	stepReset
+)
+
+func recoveryFor(failures int) recoveryStep {
+	switch {
+	case failures > 0 && failures%resetAfterFailures == 0:
+		return stepReset
+	case failures > 0 && failures%rescanAfterFailures == 0:
+		return stepRescan
+	}
+	return stepNone
+}
+
+func (d *Device) reestablish(epan Epan) (Epan, bool) {
+	const maxBackoff = time.Minute
+
+	backoff := 5 * time.Second
+	for failures := 0; ; failures++ {
 		if d.ctx.Err() != nil {
 			return epan, false
 		}
-		if attempt > 1 && (attempt-1)%rescanAfterFailures == 0 {
-			if scanned, err := d.scan(d.ctx, 6); err != nil {
+
+		step := recoveryFor(failures)
+		if step == stepReset {
+			d.log.Warn("resetting BP35A1 module", "failures", failures)
+			if err := d.initModule(d.ctx); err != nil {
+				d.log.Warn("module reinit during reconnect failed", "err", err)
+			}
+		}
+		if step != stepNone {
+			if next, err := d.scanAndCache(d.ctx); err != nil {
 				d.log.Warn("rescan during reconnect failed", "err", err)
 			} else {
-				epan = *scanned
-				if err := saveEpan(d.epanCache, epan); err != nil {
-					d.log.Warn("failed to cache EPAN", "err", err)
-				}
+				epan = next
 			}
 		}
 
 		ip, err := d.connect(d.ctx, epan)
 		if err == nil {
 			d.setIP(ip)
-			d.log.Info("PANA reconnected", "ip", ip, "attempt", attempt)
+			d.log.Info("PANA reconnected", "ip", ip, "attempt", failures+1)
 			return epan, true
 		}
 		if d.ctx.Err() != nil {
 			return epan, false
 		}
-		d.log.Warn("reconnect attempt failed", "attempt", attempt, "err", err, "backoff", backoff)
+		d.log.Warn("reconnect attempt failed", "attempt", failures+1, "err", err, "backoff", backoff)
 
 		select {
 		case <-d.ctx.Done():
@@ -112,8 +136,19 @@ func (d *Device) reestablish(epan Epan) (Epan, bool) {
 	}
 }
 
-func (d *Device) initModule(ctx context.Context, opts Options, baud int) error {
-	if err := d.correctBaudrate(ctx, baud); err != nil {
+func (d *Device) scanAndCache(ctx context.Context) (Epan, error) {
+	scanned, err := d.scan(ctx, 6)
+	if err != nil {
+		return Epan{}, err
+	}
+	if err := saveEpan(d.epanCache, *scanned); err != nil {
+		d.log.Warn("failed to cache EPAN", "err", err)
+	}
+	return *scanned, nil
+}
+
+func (d *Device) initModule(ctx context.Context) error {
+	if err := d.correctBaudrate(ctx, d.baud); err != nil {
 		return err
 	}
 	if _, err := d.command(ctx, cmdSKRESET, nil, 3*time.Second, true); err != nil {
@@ -133,11 +168,11 @@ func (d *Device) initModule(ctx context.Context, opts Options, baud int) error {
 		}
 	}
 
-	rbid := strings.ReplaceAll(opts.RouteBID, "-", "")
+	rbid := strings.ReplaceAll(d.routeBID, "-", "")
 	if _, err := d.command(ctx, cmdSKSETRBID, []string{rbid}, time.Second, false); err != nil {
 		return err
 	}
-	pwd := opts.Password
+	pwd := d.password
 	if _, err := d.command(ctx, cmdSKSETPWD, []string{fmt.Sprintf("%X", len(pwd)), pwd}, time.Second, false); err != nil {
 		return err
 	}

@@ -150,6 +150,9 @@ type Device struct {
 	epan     Epan
 	epanSeen map[string]bool
 
+	baud      int
+	routeBID  string
+	password  string
 	epanCache string
 
 	sessionEst atomic.Bool
@@ -199,6 +202,9 @@ func Open(ctx context.Context, opts Options) (*Device, error) {
 		cancel:      cancel,
 		newline:     crlf,
 		state:       stateNormal,
+		baud:        baud,
+		routeBID:    opts.RouteBID,
+		password:    opts.Password,
 		epanCache:   opts.EpanCache,
 		results:     make(chan string, 8),
 		responses:   make(chan string, 32),
@@ -213,7 +219,7 @@ func Open(ctx context.Context, opts Options) (*Device, error) {
 
 	go d.readLoop()
 
-	if err := d.setup(ctx, opts, baud); err != nil {
+	if err := d.setup(ctx); err != nil {
 		d.Close()
 		return nil, err
 	}

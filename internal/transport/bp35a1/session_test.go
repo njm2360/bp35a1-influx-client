@@ -124,6 +124,28 @@ func TestReestablishReconnects(t *testing.T) {
 	}
 }
 
+func TestRecoveryLadder(t *testing.T) {
+	cases := []struct {
+		failures int
+		want     recoveryStep
+	}{
+		{0, stepNone}, // 初回は何もしない
+		{1, stepNone},
+		{4, stepNone},
+		{5, stepRescan},  // rescanAfterFailures ごとに再スキャン
+		{10, stepRescan}, // reset の倍数でなければ rescan のまま
+		{15, stepRescan},
+		{20, stepReset}, // resetAfterFailures ごとにモジュールリセット(rescan を兼ねる)
+		{25, stepRescan},
+		{40, stepReset},
+	}
+	for _, tc := range cases {
+		if got := recoveryFor(tc.failures); got != tc.want {
+			t.Errorf("recoveryFor(%d) = %d, want %d", tc.failures, got, tc.want)
+		}
+	}
+}
+
 func TestReestablishAbortsWhenCtxDone(t *testing.T) {
 	d := newTestDevice()
 	d.cancel() // ctx 終了済み
