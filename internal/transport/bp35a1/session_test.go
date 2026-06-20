@@ -2,18 +2,23 @@ package bp35a1
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// meterResponder は connect/scan が発行する各コマンドへ疑似メータの応答を返す。
+const epandescResponse = "OK\r\nEPANDESC\r\n  Channel:21\r\n  Channel Page:09\r\n" +
+	"  Pan ID:8888\r\n  Addr:001D129012345678\r\n  LQI:E1\r\n  PairID:00112233\r\n" +
+	"EVENT 22 FE80::1\r\n"
+
 func meterResponder(fp *fakePort, mac string, panaEvent string) func([]byte) {
 	return func(p []byte) {
 		s := string(p)
 		switch {
 		case strings.HasPrefix(s, "SKLL64"):
-			fp.push([]byte(mac + "\r\n")) // SKLL64 は OK/FAIL なしで IPv6 を返す
+			fp.push([]byte(mac + "\r\n"))
 		case strings.HasPrefix(s, "SKJOIN"):
 			fp.push([]byte("OK\r\n" + panaEvent + "\r\n"))
 		default:
@@ -86,11 +91,7 @@ func TestScanHappyPath(t *testing.T) {
 	fp := newFakePort()
 	fp.onWrite = func(p []byte) {
 		if strings.HasPrefix(string(p), "SKSCAN") {
-			// EPANDESC とスキャン完了(EVENT 22)を一気に流す。順序保証により
-			// scan は完了を観測しても EPANDESC を取りこぼさない(タイミング非依存)。
-			fp.push([]byte("OK\r\nEPANDESC\r\n  Channel:21\r\n  Channel Page:09\r\n" +
-				"  Pan ID:8888\r\n  Addr:001D129012345678\r\n  LQI:E1\r\n  PairID:00112233\r\n" +
-				"EVENT 22 FE80::1\r\n"))
+			fp.push([]byte(epandescResponse))
 		}
 	}
 	d := newDeviceWithPort(fp)
@@ -121,6 +122,95 @@ func TestReestablishReconnects(t *testing.T) {
 	}
 	if d.getIP() != ip || !d.sessionEst.Load() {
 		t.Fatalf("session not restored: ip=%q tx=%v", d.getIP(), d.sessionEst.Load())
+	}
+}
+
+func TestEstablishUsesCachedEpan(t *testing.T) {
+	const ip = "FE80::5"
+	cache := filepath.Join(t.TempDir(), "epan.json")
+	if err := saveEpan(cache, Epan{Channel: 0x21, PanID: 0x8888, MACAddress: "001D129012345678"}); err != nil {
+		t.Fatalf("saveEpan: %v", err)
+	}
+
+	fp := newFakePort()
+	var mu sync.Mutex
+	var scans int
+	fp.onWrite = func(p []byte) {
+		s := string(p)
+		if strings.HasPrefix(s, "SKSCAN") {
+			mu.Lock()
+			scans++
+			mu.Unlock()
+		}
+		meterResponder(fp, ip, "EVENT 25 "+ip)(p)
+	}
+	d := newDeviceWithPort(fp)
+	d.epanCache = cache
+	defer d.Close()
+
+	if _, err := d.establish(context.Background()); err != nil {
+		t.Fatalf("establish: %v", err)
+	}
+	if d.getIP() != ip || !d.sessionEst.Load() {
+		t.Fatalf("session not established: ip=%q est=%v", d.getIP(), d.sessionEst.Load())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if scans != 0 {
+		t.Fatalf("cached path should not scan, got %d scans", scans)
+	}
+}
+
+func TestEstablishRescansWhenCachedConnectFails(t *testing.T) {
+	const ip = "FE80::6"
+	cache := filepath.Join(t.TempDir(), "epan.json")
+	if err := saveEpan(cache, Epan{Channel: 0x07, PanID: 0x1111, MACAddress: "001D129012345678"}); err != nil {
+		t.Fatalf("saveEpan: %v", err)
+	}
+
+	fp := newFakePort()
+	var mu sync.Mutex
+	var joins int
+	fp.onWrite = func(p []byte) {
+		s := string(p)
+		switch {
+		case strings.HasPrefix(s, "SKSCAN"):
+			fp.push([]byte(epandescResponse))
+		case strings.HasPrefix(s, "SKLL64"):
+			fp.push([]byte(ip + "\r\n"))
+		case strings.HasPrefix(s, "SKJOIN"):
+			mu.Lock()
+			joins++
+			n := joins
+			mu.Unlock()
+			if n == 1 {
+				fp.push([]byte("OK\r\nEVENT 24 " + ip + "\r\n")) // 初回(古いキャッシュ)は失敗
+			} else {
+				fp.push([]byte("OK\r\nEVENT 25 " + ip + "\r\n")) // 再スキャン後は成功
+			}
+		default:
+			fp.push([]byte("OK\r\n"))
+		}
+	}
+	d := newDeviceWithPort(fp)
+	d.epanCache = cache
+	defer d.Close()
+
+	epan, err := d.establish(context.Background())
+	if err != nil {
+		t.Fatalf("establish: %v", err)
+	}
+	if d.getIP() != ip || !d.sessionEst.Load() {
+		t.Fatalf("session not established: ip=%q est=%v", d.getIP(), d.sessionEst.Load())
+	}
+	// 再スキャンで取得したEPANに更新されていること。
+	if epan.Channel != 0x21 {
+		t.Fatalf("epan should be refreshed by rescan, got channel %#x", epan.Channel)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if joins != 2 {
+		t.Fatalf("want exactly 2 JOIN attempts (initial + retry), got %d", joins)
 	}
 }
 

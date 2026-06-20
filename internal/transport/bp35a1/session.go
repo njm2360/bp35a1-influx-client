@@ -15,27 +15,39 @@ func (d *Device) setup(ctx context.Context) error {
 	if err := d.initModule(ctx); err != nil {
 		return err
 	}
-
-	epan, ok := loadEpan(d.epanCache)
-	if ok {
-		d.log.Info("using cached EPAN", "channel", epan.Channel, "pan_id", epan.PanID)
-	} else {
-		scanned, err := d.scanAndCache(ctx)
-		if err != nil {
-			return err
-		}
-		epan = scanned
-	}
-
-	ip, err := d.connect(ctx, epan)
+	epan, err := d.establish(ctx)
 	if err != nil {
 		return err
 	}
-	d.setIP(ip)
-	d.log.Info("PANA connected", "ip", ip)
-
 	go d.manage(epan)
 	return nil
+}
+
+func (d *Device) establish(ctx context.Context) (Epan, error) {
+	epan, cached := loadEpan(d.epanCache)
+	if cached {
+		d.log.Info("using cached EPAN", "channel", epan.Channel, "pan_id", epan.PanID)
+	} else {
+		var err error
+		if epan, err = d.scanAndCache(ctx); err != nil {
+			return Epan{}, err
+		}
+	}
+
+	ip, err := d.connect(ctx, epan)
+	if err != nil && cached {
+		d.log.Warn("connect with cached EPAN failed; rescanning once", "err", err)
+		if epan, err = d.scanAndCache(ctx); err != nil {
+			return Epan{}, err
+		}
+		ip, err = d.connect(ctx, epan)
+	}
+	if err != nil {
+		return Epan{}, err
+	}
+	d.setIP(ip)
+	d.log.Info("PANA connected", "ip", ip)
+	return epan, nil
 }
 
 func (d *Device) signalReconnect() {
