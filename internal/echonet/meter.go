@@ -3,6 +3,7 @@ package echonet
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -71,7 +72,7 @@ func DecodeBRouteID(edt []byte) (BRouteID, error) {
 	if len(edt) != 16 {
 		return BRouteID{}, fmt.Errorf("echonet: b-route id expects 16 bytes, got %d", len(edt))
 	}
-	return BRouteID{Raw: append([]byte(nil), edt...)}, nil
+	return BRouteID{Raw: slices.Clone(edt)}, nil
 }
 
 // 0xD3 係数

@@ -15,9 +15,9 @@ type PropSpec struct {
 var meterProps = map[byte]PropSpec{
 	// --- 機器オブジェクトスーパークラス ---
 	EPCOperationStatus: {"動作状態", func(e []byte, _ *time.Location) (any, error) { return DecodeOperationStatus(e) }},
-	EPCStandardVersion: {"規格Version情報", func(e []byte, _ *time.Location) (any, error) { return append([]byte(nil), e...), nil }},
+	EPCStandardVersion: {"規格Version情報", func(e []byte, _ *time.Location) (any, error) { return slices.Clone(e), nil }},
 	EPCFaultStatus:     {"異常発生状態", func(e []byte, _ *time.Location) (any, error) { return DecodeFaultStatus(e) }},
-	EPCMakerCode:       {"メーカコード", func(e []byte, _ *time.Location) (any, error) { return append([]byte(nil), e...), nil }},
+	EPCMakerCode:       {"メーカコード", func(e []byte, _ *time.Location) (any, error) { return slices.Clone(e), nil }},
 	EPCSerialNumber:    {"製造番号", func(e []byte, _ *time.Location) (any, error) { return DecodeString(e), nil }},
 	EPCStatusChangeMap: {"状変アナウンスプロパティマップ", func(e []byte, _ *time.Location) (any, error) { return DecodePropertyMap(e) }},
 	EPCSetPropertyMap:  {"Setプロパティマップ", func(e []byte, _ *time.Location) (any, error) { return DecodePropertyMap(e) }},

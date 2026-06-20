@@ -331,19 +331,3 @@ func TestParseHex(t *testing.T) {
 		}
 	}
 }
-
-func TestHexToBytes(t *testing.T) {
-	b, err := hexToBytes("1081ABCD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []byte{0x10, 0x81, 0xAB, 0xCD}
-	for i := range want {
-		if b[i] != want[i] {
-			t.Fatalf("byte %d: got %#x want %#x", i, b[i], want[i])
-		}
-	}
-	if _, err := hexToBytes("ZZ"); err == nil {
-		t.Fatal("invalid hex should error")
-	}
-}

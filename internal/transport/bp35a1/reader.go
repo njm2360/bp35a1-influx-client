@@ -2,6 +2,7 @@ package bp35a1
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -132,7 +133,7 @@ func (d *Device) processNormal(line string) {
 }
 
 func (d *Device) handleERXUDP(line string) {
-	f := strings.Split(line, " ")
+	f := strings.Fields(line)
 	if len(f) < 9 {
 		d.log.Warn("malformed ERXUDP", "fields", len(f))
 		return
@@ -164,7 +165,7 @@ func (d *Device) handleERXUDP(line string) {
 		d.log.Warn("bad ERXUDP datalen", "err", err)
 		return
 	}
-	payload, err := hexToBytes(f[8])
+	payload, err := hex.DecodeString(f[8])
 	if err != nil {
 		d.log.Warn("bad ERXUDP payload", "err", err)
 		return
@@ -180,7 +181,7 @@ func (d *Device) handleERXUDP(line string) {
 }
 
 func (d *Device) handleEvent(line string) {
-	f := strings.Split(line, " ")
+	f := strings.Fields(line)
 	if len(f) < 3 {
 		d.log.Warn("malformed EVENT (too few fields)", "line", line)
 		return
@@ -307,16 +308,4 @@ func (d *Device) clearBuffer() {
 func parseHex(s string) int {
 	v, _ := strconv.ParseInt(strings.TrimSpace(s), 16, 64)
 	return int(v)
-}
-
-func hexToBytes(s string) ([]byte, error) {
-	b := make([]byte, len(s)/2)
-	for i := range b {
-		v, err := strconv.ParseUint(s[i*2:i*2+2], 16, 8)
-		if err != nil {
-			return nil, err
-		}
-		b[i] = byte(v)
-	}
-	return b, nil
 }
