@@ -3,6 +3,7 @@ package bp35a1
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -162,6 +163,43 @@ func TestSendBlockedByTxLimit(t *testing.T) {
 	}
 	if fp.writtenString() != "" {
 		t.Fatalf("nothing should be written, got %q", fp.writtenString())
+	}
+}
+
+func TestSendRejectsPayloadSize(t *testing.T) {
+	cases := []struct {
+		name    string
+		size    int
+		wantErr bool
+	}{
+		{"empty", 0, true},
+		{"min", 1, false},
+		{"max", maxUDPPayload, false},
+		{"over", maxUDPPayload + 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := newFakePort()
+			fp.onWrite = func([]byte) { fp.push([]byte("OK\r\n")) }
+			d := newDeviceWithPort(fp)
+			defer d.Close()
+			d.sessionEst.Store(true)
+			d.setIP("FE80::1")
+
+			err := d.Send(context.Background(), make([]byte, tc.size))
+			if tc.wantErr {
+				if !errors.Is(err, ErrPayloadSize) {
+					t.Fatalf("want ErrPayloadSize, got %v", err)
+				}
+				if fp.writtenString() != "" {
+					t.Fatalf("nothing should be written, got %q", fp.writtenString())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Send(%d bytes): %v", tc.size, err)
+			}
+		})
 	}
 }
 

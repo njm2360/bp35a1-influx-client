@@ -17,6 +17,18 @@ import (
 
 const echonetPort = 3610
 
+const defaultUDPHandle = 1
+
+const maxUDPPayload = 1232
+
+type SecOption uint8
+
+const (
+	SecPlaintext            SecOption = 0
+	SecEncrypted            SecOption = 1
+	SecEncryptedOrPlaintext SecOption = 2
+)
+
 const defaultBaud = 115200
 
 var candidateBauds = []int{115200, 2400, 4800, 9600, 19200, 38400, 57600}
@@ -83,6 +95,7 @@ var (
 	ErrTxLimited    = errors.New("bp35a1: UDP transmit blocked (ARIB transmit-time limit)")
 	ErrPANAConnect  = errors.New("bp35a1: PANA connection failed")
 	ErrClosed       = errors.New("bp35a1: device closed")
+	ErrPayloadSize  = errors.New("bp35a1: payload size out of range (1-1232 bytes)")
 )
 
 type rxState int
@@ -233,14 +246,10 @@ func (d *Device) Send(ctx context.Context, payload []byte) error {
 	if !d.txAllowed.Load() {
 		return ErrTxLimited
 	}
-	params := []string{
-		"1",
-		d.getIP(),
-		fmt.Sprintf("%04X", echonetPort),
-		"1",
-		fmt.Sprintf("%04X", len(payload)),
+	if n := len(payload); n < 1 || n > maxUDPPayload {
+		return fmt.Errorf("%w: %d bytes", ErrPayloadSize, n)
 	}
-	_, err := d.sendUDP(ctx, params, payload)
+	_, err := d.sendUDP(ctx, defaultUDPHandle, SecEncrypted, payload)
 	return err
 }
 

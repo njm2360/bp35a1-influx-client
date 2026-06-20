@@ -11,7 +11,14 @@ func (d *Device) command(ctx context.Context, cmd string, params []string, timeo
 	return d.exec(ctx, cmd, params, nil, timeout, expectEcho)
 }
 
-func (d *Device) sendUDP(ctx context.Context, params []string, payload []byte) (string, error) {
+func (d *Device) sendUDP(ctx context.Context, handle uint8, sec SecOption, payload []byte) (string, error) {
+	params := []string{
+		fmt.Sprintf("%d", handle),
+		d.getIP(),
+		fmt.Sprintf("%04X", echonetPort),
+		fmt.Sprintf("%d", sec),
+		fmt.Sprintf("%04X", len(payload)),
+	}
 	return d.exec(ctx, cmdSKSENDTO, params, payload, time.Second, false)
 }
 
