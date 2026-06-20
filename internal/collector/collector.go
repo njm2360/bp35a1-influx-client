@@ -75,9 +75,9 @@ func (c *Collector) tick(ctx context.Context, d time.Duration, name string, job 
 		case <-t.C:
 			start := time.Now()
 			if err := job(ctx); err != nil {
-				c.log.Warn("job failed", "job", name, "err", err, "elapsed", time.Since(start))
+				c.log.Warn("job failed", "job", name, "err", err, "elapsed", time.Since(start).Round(time.Millisecond))
 			} else {
-				c.log.Debug("job completed", "job", name, "elapsed", time.Since(start))
+				c.log.Debug("job completed", "job", name, "elapsed", time.Since(start).Round(time.Millisecond))
 			}
 		}
 	}
@@ -94,9 +94,9 @@ func (c *Collector) tickAt(ctx context.Context, minutes []int, name string, job 
 		case <-timer.C:
 			start := time.Now()
 			if err := job(ctx); err != nil {
-				c.log.Warn("job failed", "job", name, "err", err, "elapsed", time.Since(start))
+				c.log.Warn("job failed", "job", name, "err", err, "elapsed", time.Since(start).Round(time.Millisecond))
 			} else {
-				c.log.Debug("job completed", "job", name, "elapsed", time.Since(start))
+				c.log.Debug("job completed", "job", name, "elapsed", time.Since(start).Round(time.Millisecond))
 			}
 		}
 	}

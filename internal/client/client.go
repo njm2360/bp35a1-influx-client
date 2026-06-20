@@ -94,7 +94,7 @@ func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.P
 		return echonet.Frame{}, ctx.Err()
 	case resp := <-ch:
 		c.recordSuccess()
-		elapsed := time.Since(start)
+		elapsed := time.Since(start).Round(time.Millisecond)
 		switch resp.ESV {
 		case echonet.ESVGetSNA, echonet.ESVSetCSNA:
 			c.log.Debug("request SNA", "tid", tid, "elapsed", elapsed)

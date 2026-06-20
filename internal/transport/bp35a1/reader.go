@@ -138,31 +138,32 @@ func (d *Device) handleERXUDP(line string) {
 		d.log.Warn("malformed ERXUDP", "fields", len(f))
 		return
 	}
-	d.log.Debug("ERXUDP received",
-		"sender", f[1],
-		"dest", f[2],
-		"rport", f[3],
-		"lport", f[4],
-		"sender_lla", f[5],
-		"secured", f[6],
-		"datalen", f[7],
-	)
-	dstPort, err := strconv.ParseInt(f[4], 16, 32)
+	rport, _ := strconv.ParseInt(f[3], 16, 32)
+	lport, err := strconv.ParseInt(f[4], 16, 32)
 	if err != nil {
 		d.log.Warn("bad ERXUDP dst port", "err", err)
-		return
-	}
-	if int(dstPort) != echonetPort {
-		d.log.Debug("ERXUDP ignored (non-ECHONET)", "dst_port", fmt.Sprintf("%04X", dstPort))
-		return
-	}
-	if f[6] != "1" {
-		d.log.Warn("ERXUDP dropped (unsecured frame)", "src", f[1], "secured", f[6])
 		return
 	}
 	dataLen, err := strconv.ParseInt(f[7], 16, 32)
 	if err != nil {
 		d.log.Warn("bad ERXUDP datalen", "err", err)
+		return
+	}
+	d.log.Debug("ERXUDP received",
+		"sender", f[1],
+		"dest", f[2],
+		"rport", rport,
+		"lport", lport,
+		"sender_lla", f[5],
+		"secured", f[6],
+		"datalen", dataLen,
+	)
+	if int(lport) != echonetPort {
+		d.log.Debug("ERXUDP ignored (non-ECHONET)", "dst_port", fmt.Sprintf("%04X", lport))
+		return
+	}
+	if f[6] != "1" {
+		d.log.Warn("ERXUDP dropped (unsecured frame)", "src", f[1], "secured", f[6])
 		return
 	}
 	payload, err := hex.DecodeString(f[8])

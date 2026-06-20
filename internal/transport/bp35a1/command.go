@@ -72,7 +72,7 @@ func (d *Device) exec(ctx context.Context, cmd string, params []string, data []b
 	case <-timer.C:
 		return "", fmt.Errorf("bp35a1: %s result timeout", cmd)
 	case res := <-d.results:
-		elapsed := time.Since(start)
+		elapsed := time.Since(start).Round(time.Millisecond)
 		if strings.HasPrefix(res, "FAIL") {
 			d.log.Debug("command failed", "cmd", cmd, "result", res, "elapsed", elapsed)
 			return "", commandError(res)
