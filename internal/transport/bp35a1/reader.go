@@ -137,6 +137,15 @@ func (d *Device) handleERXUDP(line string) {
 		d.log.Warn("malformed ERXUDP", "fields", len(f))
 		return
 	}
+	d.log.Debug("ERXUDP received",
+		"sender", f[1],
+		"dest", f[2],
+		"rport", f[3],
+		"lport", f[4],
+		"sender_lla", f[5],
+		"secured", f[6],
+		"datalen", f[7],
+	)
 	dstPort, err := strconv.ParseInt(f[4], 16, 32)
 	if err != nil {
 		d.log.Warn("bad ERXUDP dst port", "err", err)
@@ -146,12 +155,24 @@ func (d *Device) handleERXUDP(line string) {
 		d.log.Debug("ERXUDP ignored (non-ECHONET)", "dst_port", fmt.Sprintf("%04X", dstPort))
 		return
 	}
+	if f[6] != "1" {
+		d.log.Warn("ERXUDP dropped (unsecured frame)", "src", f[1], "secured", f[6])
+		return
+	}
+	dataLen, err := strconv.ParseInt(f[7], 16, 32)
+	if err != nil {
+		d.log.Warn("bad ERXUDP datalen", "err", err)
+		return
+	}
 	payload, err := hexToBytes(f[8])
 	if err != nil {
 		d.log.Warn("bad ERXUDP payload", "err", err)
 		return
 	}
-	d.log.Debug("ERXUDP received", "src", f[1], "len", len(payload))
+	if len(payload) != int(dataLen) {
+		d.log.Warn("ERXUDP length mismatch", "declared", dataLen, "actual", len(payload))
+		return
+	}
 	select {
 	case d.rxudp <- payload:
 	case <-d.closed:
