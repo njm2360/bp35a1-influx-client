@@ -21,7 +21,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("fatal", "err", err)
+		slog.With("component", "main").Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
@@ -61,6 +61,7 @@ func run() error {
 	if err := g.Wait(); err != nil && err != context.Canceled {
 		return err
 	}
+	log.Info("smartmeter collector stopped")
 	return nil
 }
 

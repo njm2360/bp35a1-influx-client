@@ -38,10 +38,10 @@ func (d *Device) readLoop() {
 			}
 			errCount++
 			if errCount >= maxConsecutiveReadErrors {
-				d.log.Error("serial read error; giving up", "err", err, "consecutive", errCount)
+				d.serialLog.Error("serial read error; giving up", "err", err, "consecutive", errCount)
 				return
 			}
-			d.log.Debug("serial read error; retrying", "err", err, "consecutive", errCount)
+			d.serialLog.Debug("serial read error; retrying", "err", err, "consecutive", errCount)
 			select {
 			case <-d.ctx.Done():
 				return
@@ -79,7 +79,7 @@ func (d *Device) feed(chunk []byte) {
 	}
 
 	if len(d.buf) > maxLineBytes {
-		d.log.Warn("rx buffer overflow without newline; discarding", "bytes", len(d.buf))
+		d.serialLog.Warn("rx buffer overflow without newline; discarding", "bytes", len(d.buf))
 		d.buf = nil
 	}
 	d.bufMu.Unlock()
