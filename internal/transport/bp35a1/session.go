@@ -15,12 +15,33 @@ func (d *Device) setup(ctx context.Context) error {
 	if err := d.initModule(ctx); err != nil {
 		return err
 	}
+	stack, app, err := d.getVersions(ctx)
+	if err != nil {
+		return err
+	}
+	d.log.Info("module version", "stack", stack, "app", app)
 	epan, err := d.establish(ctx)
 	if err != nil {
 		return err
 	}
 	go d.manage(epan)
 	return nil
+}
+
+func (d *Device) getVersions(ctx context.Context) (stack, app string, err error) {
+	resp, err := d.command(ctx, cmdSKVER, nil, time.Second, true)
+	if err != nil {
+		return "", "", fmt.Errorf("bp35a1: read stack version: %w", err)
+	}
+	stack = strings.TrimSpace(strings.TrimPrefix(resp, "EVER"))
+
+	resp, err = d.command(ctx, cmdSKAPPVER, nil, time.Second, true)
+	if err != nil {
+		return "", "", fmt.Errorf("bp35a1: read app version: %w", err)
+	}
+	app = strings.TrimSpace(strings.TrimPrefix(resp, "EAPPVER"))
+
+	return stack, app, nil
 }
 
 func (d *Device) establish(ctx context.Context) (Epan, error) {

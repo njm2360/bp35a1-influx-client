@@ -42,6 +42,7 @@ const (
 	cmdSKSETRBID = "SKSETRBID" // 3.17
 	cmdSKSETPWD  = "SKSETPWD"  // 3.16
 	cmdSKVER     = "SKVER"     // 3.23
+	cmdSKAPPVER  = "SKAPPVER"  // 3.24
 	cmdSKRESET   = "SKRESET"   // 3.25
 	cmdWOPT      = "WOPT"      // 3.30
 	cmdROPT      = "ROPT"      // 3.31
