@@ -13,7 +13,7 @@ func TestCommandReturnsResponse(t *testing.T) {
 	d := newDeviceWithPort(fp)
 	defer d.Close()
 
-	res, err := d.command(context.Background(), cmdSKVER, nil, time.Second, false)
+	res, err := d.command(context.Background(), cmdSKVER, nil, time.Second)
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestCommandFailReturnsError(t *testing.T) {
 	d := newDeviceWithPort(fp)
 	defer d.Close()
 
-	if _, err := d.command(context.Background(), cmdSKSETRBID, []string{"00112233"}, time.Second, false); err == nil {
+	if _, err := d.command(context.Background(), cmdSKSETRBID, []string{"00112233"}, time.Second); err == nil {
 		t.Fatal("expected error from FAIL response")
 	} else if !strings.Contains(err.Error(), "ER06") {
 		t.Fatalf("error should mention ER06: %v", err)
@@ -44,8 +44,9 @@ func TestCommandSkipsEcho(t *testing.T) {
 	fp.onWrite = func([]byte) { fp.push([]byte("SKVER\r\nEVER 9.9.9\r\nOK\r\n")) }
 	d := newDeviceWithPort(fp)
 	defer d.Close()
+	d.echo.Store(true)
 
-	res, err := d.command(context.Background(), cmdSKVER, nil, time.Second, true)
+	res, err := d.command(context.Background(), cmdSKVER, nil, time.Second)
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestCommandTimeout(t *testing.T) {
 	d := newDeviceWithPort(fp)
 	defer d.Close()
 
-	if _, err := d.command(context.Background(), cmdSKVER, nil, 50*time.Millisecond, false); err == nil {
+	if _, err := d.command(context.Background(), cmdSKVER, nil, 50*time.Millisecond); err == nil {
 		t.Fatal("expected result timeout")
 	}
 }

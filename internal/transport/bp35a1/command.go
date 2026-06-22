@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-func (d *Device) command(ctx context.Context, cmd string, params []string, timeout time.Duration, expectEcho bool) (string, error) {
-	return d.exec(ctx, cmd, params, nil, timeout, expectEcho)
+func (d *Device) command(ctx context.Context, cmd string, params []string, timeout time.Duration) (string, error) {
+	return d.exec(ctx, cmd, params, nil, timeout)
 }
 
 func (d *Device) sendUDP(ctx context.Context, handle uint8, sec SecOption, payload []byte) (string, error) {
@@ -19,10 +19,10 @@ func (d *Device) sendUDP(ctx context.Context, handle uint8, sec SecOption, paylo
 		fmt.Sprintf("%d", sec),
 		fmt.Sprintf("%04X", len(payload)),
 	}
-	return d.exec(ctx, cmdSKSENDTO, params, payload, time.Second, false)
+	return d.exec(ctx, cmdSKSENDTO, params, payload, time.Second)
 }
 
-func (d *Device) exec(ctx context.Context, cmd string, params []string, data []byte, timeout time.Duration, expectEcho bool) (string, error) {
+func (d *Device) exec(ctx context.Context, cmd string, params []string, data []byte, timeout time.Duration) (string, error) {
 	d.cmdMu.Lock()
 	defer d.cmdMu.Unlock()
 	start := time.Now()
@@ -58,7 +58,7 @@ func (d *Device) exec(ctx context.Context, cmd string, params []string, data []b
 		return "", fmt.Errorf("bp35a1: write %s: %w", cmd, err)
 	}
 
-	if expectEcho {
+	if d.echo.Load() {
 		d.skipEcho(line)
 	}
 

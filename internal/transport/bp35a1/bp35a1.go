@@ -172,6 +172,7 @@ type Device struct {
 
 	sessionEst atomic.Bool
 	txAllowed  atomic.Bool
+	echo       atomic.Bool
 	ip         atomic.Value // string
 
 	reconnect func(Epan) (Epan, bool)

@@ -29,13 +29,13 @@ func (d *Device) setup(ctx context.Context) error {
 }
 
 func (d *Device) getVersions(ctx context.Context) (stack, app string, err error) {
-	resp, err := d.command(ctx, cmdSKVER, nil, time.Second, true)
+	resp, err := d.command(ctx, cmdSKVER, nil, time.Second)
 	if err != nil {
 		return "", "", fmt.Errorf("bp35a1: read stack version: %w", err)
 	}
 	stack = strings.TrimSpace(strings.TrimPrefix(resp, "EVER"))
 
-	resp, err = d.command(ctx, cmdSKAPPVER, nil, time.Second, true)
+	resp, err = d.command(ctx, cmdSKAPPVER, nil, time.Second)
 	if err != nil {
 		return "", "", fmt.Errorf("bp35a1: read app version: %w", err)
 	}
@@ -181,32 +181,35 @@ func (d *Device) scanAndCache(ctx context.Context) (Epan, error) {
 }
 
 func (d *Device) initModule(ctx context.Context) error {
+	d.echo.Store(true)
+
 	if err := d.correctBaudrate(ctx, d.baud); err != nil {
 		return err
 	}
-	if _, err := d.command(ctx, cmdSKRESET, nil, 3*time.Second, true); err != nil {
+	if _, err := d.command(ctx, cmdSKRESET, nil, 3*time.Second); err != nil {
 		return err
 	}
-	if _, err := d.command(ctx, cmdSKSREG, []string{"SFE", "0"}, time.Second, true); err != nil {
+	if _, err := d.command(ctx, cmdSKSREG, []string{"SFE", "0"}, time.Second); err != nil {
 		return err
 	}
+	d.echo.Store(false)
 
-	opt, err := d.command(ctx, cmdROPT, nil, time.Second, false)
+	opt, err := d.command(ctx, cmdROPT, nil, time.Second)
 	if err != nil {
 		return err
 	}
 	if opt != "01" {
-		if _, err := d.command(ctx, cmdWOPT, []string{"01"}, time.Second, false); err != nil {
+		if _, err := d.command(ctx, cmdWOPT, []string{"01"}, time.Second); err != nil {
 			return err
 		}
 	}
 
 	rbid := strings.ReplaceAll(d.routeBID, "-", "")
-	if _, err := d.command(ctx, cmdSKSETRBID, []string{rbid}, time.Second, false); err != nil {
+	if _, err := d.command(ctx, cmdSKSETRBID, []string{rbid}, time.Second); err != nil {
 		return err
 	}
 	pwd := d.password
-	if _, err := d.command(ctx, cmdSKSETPWD, []string{fmt.Sprintf("%X", len(pwd)), pwd}, time.Second, false); err != nil {
+	if _, err := d.command(ctx, cmdSKSETPWD, []string{fmt.Sprintf("%X", len(pwd)), pwd}, time.Second); err != nil {
 		return err
 	}
 	return nil
@@ -229,7 +232,7 @@ func (d *Device) correctBaudrate(ctx context.Context, preferred int) error {
 			_ = d.port.ResetInputBuffer()
 			_ = d.port.ResetOutputBuffer()
 
-			resp, err := d.command(ctx, cmdSKVER, nil, time.Second, true)
+			resp, err := d.command(ctx, cmdSKVER, nil, time.Second)
 			if err == nil && strings.HasPrefix(resp, "EVER") {
 				d.log.Info("baudrate detected", "baud", b)
 				return nil
@@ -245,7 +248,7 @@ func (d *Device) correctBaudrate(ctx context.Context, preferred int) error {
 func (d *Device) scan(ctx context.Context, initDuration int) (*Epan, error) {
 	d.log.Info("scanning for smart meter")
 	for duration := initDuration; duration <= 7; duration++ {
-		if _, err := d.command(ctx, cmdSKSCAN, []string{"2", "FFFFFFFF", strconv.Itoa(duration)}, time.Second, false); err != nil {
+		if _, err := d.command(ctx, cmdSKSCAN, []string{"2", "FFFFFFFF", strconv.Itoa(duration)}, time.Second); err != nil {
 			return nil, err
 		}
 		var found *Epan
@@ -286,17 +289,17 @@ func drainEpan(ch <-chan Epan, cur *Epan) *Epan {
 }
 
 func (d *Device) connect(ctx context.Context, epan Epan) (string, error) {
-	if _, err := d.command(ctx, cmdSKSREG, []string{"S2", fmt.Sprintf("%X", epan.Channel)}, time.Second, false); err != nil {
+	if _, err := d.command(ctx, cmdSKSREG, []string{"S2", fmt.Sprintf("%X", epan.Channel)}, time.Second); err != nil {
 		return "", err
 	}
-	if _, err := d.command(ctx, cmdSKSREG, []string{"S3", fmt.Sprintf("%X", epan.PanID)}, time.Second, false); err != nil {
+	if _, err := d.command(ctx, cmdSKSREG, []string{"S3", fmt.Sprintf("%X", epan.PanID)}, time.Second); err != nil {
 		return "", err
 	}
-	ip, err := d.command(ctx, cmdSKLL64, []string{epan.MACAddress}, time.Second, false)
+	ip, err := d.command(ctx, cmdSKLL64, []string{epan.MACAddress}, time.Second)
 	if err != nil {
 		return "", err
 	}
-	if _, err := d.command(ctx, cmdSKJOIN, []string{ip}, time.Second, false); err != nil {
+	if _, err := d.command(ctx, cmdSKJOIN, []string{ip}, time.Second); err != nil {
 		return "", err
 	}
 
