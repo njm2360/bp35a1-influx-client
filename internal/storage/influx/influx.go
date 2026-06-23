@@ -2,9 +2,11 @@ package influx
 
 import (
 	"context"
+	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/influxdata/influxdb-client-go/v2/api"
+	"github.com/influxdata/influxdb-client-go/v2/api/write"
 
 	"main/internal/config"
 	"main/internal/model"
@@ -15,6 +17,7 @@ type Writer struct {
 	client   influxdb2.Client
 	write    api.WriteAPIBlocking
 	meterTag map[string]string
+	timeout  time.Duration
 }
 
 var _ storage.Writer = (*Writer)(nil)
@@ -25,7 +28,17 @@ func New(cfg config.Config) (*Writer, error) {
 		client:   client,
 		write:    client.WriteAPIBlocking(cfg.InfluxOrg, cfg.InfluxBucket),
 		meterTag: map[string]string{"meter": cfg.MeterTag},
+		timeout:  cfg.WriteTimeout,
 	}, nil
+}
+
+func (w *Writer) writePoint(ctx context.Context, p *write.Point) error {
+	if _, ok := ctx.Deadline(); !ok && w.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, w.timeout)
+		defer cancel()
+	}
+	return w.write.WritePoint(ctx, p)
 }
 
 func (w *Writer) WritePower(ctx context.Context, m model.Power) error {
@@ -44,7 +57,7 @@ func (w *Writer) WritePower(ctx context.Context, m model.Power) error {
 		fields["current_t"] = m.CurrentT
 	}
 	p := influxdb2.NewPoint("power", w.meterTag, fields, m.Time)
-	return w.write.WritePoint(ctx, p)
+	return w.writePoint(ctx, p)
 }
 
 func (w *Writer) WriteEnergyTotal(ctx context.Context, m model.EnergyTotal) error {
@@ -52,7 +65,7 @@ func (w *Writer) WriteEnergyTotal(ctx context.Context, m model.EnergyTotal) erro
 		"kwh": m.KWh,
 		"raw": int64(m.Raw),
 	}, m.Time)
-	return w.write.WritePoint(ctx, p)
+	return w.writePoint(ctx, p)
 }
 
 func (w *Writer) WriteEnergy1Min(ctx context.Context, m model.Energy1Min) error {
@@ -60,7 +73,7 @@ func (w *Writer) WriteEnergy1Min(ctx context.Context, m model.Energy1Min) error 
 		"kwh": m.KWh,
 		"raw": int64(m.Raw),
 	}, m.Time)
-	return w.write.WritePoint(ctx, p)
+	return w.writePoint(ctx, p)
 }
 
 func (w *Writer) WriteEnergy30Min(ctx context.Context, m model.Energy30Min) error {
@@ -68,14 +81,14 @@ func (w *Writer) WriteEnergy30Min(ctx context.Context, m model.Energy30Min) erro
 		"kwh": m.KWh,
 		"raw": int64(m.Raw),
 	}, m.Time)
-	return w.write.WritePoint(ctx, p)
+	return w.writePoint(ctx, p)
 }
 
 func (w *Writer) WriteStatus(ctx context.Context, m model.Status) error {
 	p := influxdb2.NewPoint("status", w.meterTag, map[string]any{
 		"fault": m.Fault,
 	}, m.Time)
-	return w.write.WritePoint(ctx, p)
+	return w.writePoint(ctx, p)
 }
 
 func (w *Writer) WriteMeta(ctx context.Context, m model.Meta) error {
@@ -88,7 +101,7 @@ func (w *Writer) WriteMeta(ctx context.Context, m model.Meta) error {
 		"digits":      int64(m.Digits),
 		"version":     m.Version,
 	}, m.Time)
-	return w.write.WritePoint(ctx, p)
+	return w.writePoint(ctx, p)
 }
 
 func (w *Writer) Close() error {

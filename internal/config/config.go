@@ -37,6 +37,9 @@ type Config struct {
 	RequestTimeout     time.Duration
 	RequestTimeoutLong time.Duration
 
+	// ストレージ書き込みタイマー
+	WriteTimeout time.Duration
+
 	// 計測日時(EDT)の解釈に使うタイムゾーン
 	Location *time.Location
 
@@ -62,6 +65,7 @@ func Load() (Config, error) {
 		PollEnergy:         getEnvDuration("POLL_ENERGY", 60*time.Second),
 		RequestTimeout:     getEnvDuration("REQUEST_TIMEOUT", 20*time.Second),
 		RequestTimeoutLong: getEnvDuration("REQUEST_TIMEOUT_LONG", 60*time.Second),
+		WriteTimeout:       getEnvDuration("WRITE_TIMEOUT", 10*time.Second),
 		LogLevel:           getEnv("LOG_LEVEL", "info"),
 	}
 
