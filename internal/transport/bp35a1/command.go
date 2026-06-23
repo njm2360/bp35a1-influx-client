@@ -34,7 +34,7 @@ func (d *Device) exec(ctx context.Context, cmd string, params []string, data []b
 	switch cmd {
 	case cmdROPT, cmdWOPT, cmdRUART, cmdWUART:
 		newline = cr
-		if cmd == cmdROPT {
+		if cmd == cmdROPT || cmd == cmdRUART {
 			state = stateProductRead
 		}
 	case cmdSKLL64:

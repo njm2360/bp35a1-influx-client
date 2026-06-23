@@ -42,6 +42,7 @@ type fakePort struct {
 	mu        sync.Mutex
 	written   bytes.Buffer
 	readCh    chan []byte
+	readErrs  chan error // Read で返す注入エラー(readLoop のエラー処理検証用)
 	rem       []byte
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -50,8 +51,9 @@ type fakePort struct {
 
 func newFakePort() *fakePort {
 	return &fakePort{
-		readCh: make(chan []byte, 16),
-		closed: make(chan struct{}),
+		readCh:   make(chan []byte, 16),
+		readErrs: make(chan error, 16),
+		closed:   make(chan struct{}),
 	}
 }
 
@@ -69,10 +71,18 @@ func (f *fakePort) writtenString() string {
 }
 
 func (f *fakePort) Read(p []byte) (int, error) {
+	// 注入エラーがあれば優先して返す(readLoop のリトライ/断念経路の検証用)。
+	select {
+	case err := <-f.readErrs:
+		return 0, err
+	default:
+	}
 	for len(f.rem) == 0 {
 		select {
 		case <-f.closed:
 			return 0, io.EOF
+		case err := <-f.readErrs:
+			return 0, err
 		case b := <-f.readCh:
 			f.rem = b
 		}
@@ -202,6 +212,35 @@ func TestSendRejectsPayloadSize(t *testing.T) {
 				t.Fatalf("Send(%d bytes): %v", tc.size, err)
 			}
 		})
+	}
+}
+
+func TestReconnect(t *testing.T) {
+	d := newTestDevice()
+	d.sessionEst.Store(true)
+	d.Reconnect()
+	if d.sessionEst.Load() {
+		t.Fatal("Reconnect should clear sessionEst")
+	}
+	select {
+	case <-d.reconnectCh:
+	default:
+		t.Fatal("Reconnect should signal reconnectCh")
+	}
+}
+
+func TestEscapeSerial(t *testing.T) {
+	cases := map[string]string{
+		"AB":           "AB",           // 印字可能はそのまま
+		"\r\n":         `\r\n`,         // CR/LF
+		"\t":           `\t`,           // タブ
+		`\`:            `\\`,           // バックスラッシュ自身
+		"\x00\x1f\x7f": `\x00\x1f\x7f`, // 制御文字・非印字は \xNN
+	}
+	for in, want := range cases {
+		if got := escapeSerial([]byte(in)); got != want {
+			t.Errorf("escapeSerial(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

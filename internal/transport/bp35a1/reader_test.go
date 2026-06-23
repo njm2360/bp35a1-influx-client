@@ -1,9 +1,55 @@
 package bp35a1
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+// TestReadLoopRecoversFromTransientError は readLoop が一時的な read エラーで
+// 終了せずリトライし、その後の正常行を処理できることを検証する。
+func TestReadLoopRecoversFromTransientError(t *testing.T) {
+	fp := newFakePort()
+	d := newTestDevice()
+	d.port = fp
+	go d.readLoop()
+	defer d.Close()
+
+	// 連続エラー上限未満のエラーを注入 → 諦めずにリトライする。
+	fp.readErrs <- errors.New("transient 1")
+	fp.readErrs <- errors.New("transient 2")
+	// その後に正常行を投入 → 復帰して処理されること。
+	fp.push([]byte("OK\r\n"))
+
+	select {
+	case r := <-d.results:
+		if r != "OK" {
+			t.Fatalf("want OK after recovery, got %q", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("readLoop did not recover from transient read errors")
+	}
+}
+
+// TestReadLoopGivesUpAfterMaxErrors は連続 read エラーが上限に達すると
+// readLoop が終了し、defer の Close でデバイスが閉じることを検証する。
+func TestReadLoopGivesUpAfterMaxErrors(t *testing.T) {
+	fp := newFakePort()
+	d := newTestDevice()
+	d.port = fp
+	go d.readLoop()
+
+	for i := 0; i < maxConsecutiveReadErrors; i++ {
+		fp.readErrs <- errors.New("persistent")
+	}
+
+	select {
+	case <-d.closed:
+		// readLoop の defer d.Close() により閉じられた。
+	case <-time.After(3 * time.Second):
+		t.Fatal("readLoop should give up and close after consecutive errors")
+	}
+}
 
 func TestFeedERXUDP(t *testing.T) {
 	d := newTestDevice()
@@ -222,6 +268,48 @@ func TestHandleERXUDPMalformedIgnored(t *testing.T) {
 	case b := <-d.rxudp:
 		t.Fatalf("malformed ERXUDP should be ignored, got %x", b)
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// TestHandleERXUDPDropped は handleERXUDP の各バリデーション分岐を検証する。
+// いずれも rxudp へは流さず黙って破棄されること(防御的挙動)を確認する。
+func TestHandleERXUDPDropped(t *testing.T) {
+	// 形式: ERXUDP <sender> <dest> <rport> <lport> <lla> <secured> <datalen> <data>
+	cases := []struct {
+		name string
+		line string
+	}{
+		{
+			// f[6]="0": 非セキュア(暗号化なし)フレームは受理しない。
+			name: "unsecured_frame",
+			line: "ERXUDP FE80::1 FE80::2 0E1A 0E1A 001D129012345678 0 000A 1081000102880105FF01\r\n",
+		},
+		{
+			// datalen=000A(10) だが実データは 2 バイト。宣言長と不一致。
+			name: "datalen_payload_mismatch",
+			line: "ERXUDP FE80::1 FE80::2 0E1A 0E1A 001D129012345678 1 000A ABCD\r\n",
+		},
+		{
+			// f[4] が不正な 16 進 → 宛先ポート解析失敗。
+			name: "bad_dst_port_hex",
+			line: "ERXUDP FE80::1 FE80::2 0E1A ZZZZ 001D129012345678 1 0002 1081\r\n",
+		},
+		{
+			// f[7] が不正な 16 進 → datalen 解析失敗。
+			name: "bad_datalen_hex",
+			line: "ERXUDP FE80::1 FE80::2 0E1A 0E1A 001D129012345678 1 ZZZZ 1081\r\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newTestDevice()
+			d.feed([]byte(tc.line))
+			select {
+			case b := <-d.rxudp:
+				t.Fatalf("frame should be dropped, got %x", b)
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
 	}
 }
 

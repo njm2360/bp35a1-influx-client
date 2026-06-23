@@ -27,6 +27,119 @@ func meterResponder(fp *fakePort, mac string, panaEvent string) func([]byte) {
 	}
 }
 
+func TestGetVersions(t *testing.T) {
+	fp := newFakePort()
+	fp.onWrite = func(p []byte) {
+		switch {
+		case strings.HasPrefix(string(p), "SKVER"):
+			fp.push([]byte("EVER 1.2.3\r\nOK\r\n"))
+		case strings.HasPrefix(string(p), "SKAPPVER"):
+			fp.push([]byte("EAPPVER rev26e\r\nOK\r\n"))
+		default:
+			fp.push([]byte("OK\r\n"))
+		}
+	}
+	d := newDeviceWithPort(fp)
+	defer d.Close()
+
+	stack, app, err := d.getVersions(context.Background())
+	if err != nil {
+		t.Fatalf("getVersions: %v", err)
+	}
+	// EVER / EAPPVER のプレフィックスが除去され値だけ残ること。
+	if stack != "1.2.3" {
+		t.Fatalf("stack = %q, want 1.2.3", stack)
+	}
+	if app != "rev26e" {
+		t.Fatalf("app = %q, want rev26e", app)
+	}
+}
+
+func TestCorrectBaudrateDetects(t *testing.T) {
+	fp := newFakePort()
+	fp.onWrite = func(p []byte) {
+		if strings.HasPrefix(strings.TrimSpace(string(p)), "SKVER") {
+			fp.push([]byte("EVER 1.2.3\r\nOK\r\n"))
+		}
+	}
+	d := newDeviceWithPort(fp)
+	defer d.Close()
+
+	if err := d.correctBaudrate(context.Background(), defaultBaud); err != nil {
+		t.Fatalf("correctBaudrate: %v", err)
+	}
+}
+
+func TestCorrectBaudrateFailsWhenNoEVER(t *testing.T) {
+	fp := newFakePort()
+	fp.onWrite = func(p []byte) {
+		// どのボーレートでも EVER を返さない(FAIL のみ)。
+		if strings.HasPrefix(strings.TrimSpace(string(p)), "SKVER") {
+			fp.push([]byte("FAIL ER\r\n"))
+		}
+	}
+	d := newDeviceWithPort(fp)
+	defer d.Close()
+
+	if err := d.correctBaudrate(context.Background(), defaultBaud); err == nil {
+		t.Fatal("expected error when no baudrate yields EVER")
+	}
+}
+
+// TestInitModule はモジュール初期化ハンドシェイク全体を検証する。
+// 実機のエコーバック(echo フラグ ON 中)を再現しつつ、ROPT の値によって
+// WOPT 設定が出る/出ないことと、最終的に echo が無効化されることを確認する。
+func TestInitModule(t *testing.T) {
+	cases := []struct {
+		name     string
+		optResp  string // ROPT が返すオプション値
+		wantWOPT bool   // WOPT 書き込みを期待するか
+	}{
+		{"opt_already_set_skips_wopt", "01", false}, // 設定済みなら WOPT 省略
+		{"opt_unset_writes_wopt", "00", true},       // 未設定なら WOPT で設定
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := newFakePort()
+			d := newDeviceWithPort(fp)
+			defer d.Close()
+
+			optResp := tc.optResp
+			fp.onWrite = func(p []byte) {
+				s := strings.TrimSpace(string(p))
+				if s == "" {
+					return // ボーレート検出時の CRLF プローブ
+				}
+				// 実機は常にエコーバックする。ドライバの echo フラグが
+				// 立っている間(SFE 0 で無効化するまで)だけ再現する。
+				if d.echo.Load() {
+					fp.push([]byte(s + "\r\n"))
+				}
+				switch {
+				case strings.HasPrefix(s, "SKVER"):
+					fp.push([]byte("EVER 1.2.3\r\nOK\r\n"))
+				case strings.HasPrefix(s, "ROPT"):
+					fp.push([]byte("OK " + optResp + "\r")) // CR 終端・OK+値
+				case strings.HasPrefix(s, "WOPT"):
+					fp.push([]byte("OK\r")) // CR 終端
+				default:
+					fp.push([]byte("OK\r\n"))
+				}
+			}
+
+			if err := d.initModule(context.Background()); err != nil {
+				t.Fatalf("initModule: %v", err)
+			}
+			if d.echo.Load() {
+				t.Fatal("echo should be disabled after SFE 0")
+			}
+			if got := strings.Contains(fp.writtenString(), "WOPT"); got != tc.wantWOPT {
+				t.Fatalf("WOPT written = %v, want %v", got, tc.wantWOPT)
+			}
+		})
+	}
+}
+
 func TestManageReconnectsOnLifetimeExpire(t *testing.T) {
 	d := newTestDevice()
 	defer d.cancel()
