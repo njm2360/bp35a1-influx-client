@@ -80,8 +80,8 @@ func (w *fakeWriter) Close() error { return nil }
 
 func testConfig() config.Config {
 	return config.Config{
-		GetTimeout:     time.Second,
-		GetTimeoutLong: time.Second,
+		RequestTimeout:     time.Second,
+		RequestTimeoutLong: time.Second,
 		Location:       time.FixedZone("JST", 9*3600),
 	}
 }

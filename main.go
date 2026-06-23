@@ -50,7 +50,7 @@ func run() error {
 	}
 	defer store.Close()
 
-	cli := client.New(tr, log)
+	cli := client.New(tr, log, cfg.RequestTimeout)
 	col := collector.New(cli, store, cfg, log)
 
 	g, ctx := errgroup.WithContext(ctx)

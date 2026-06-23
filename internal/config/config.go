@@ -34,8 +34,8 @@ type Config struct {
 	PollEnergy time.Duration
 
 	// 応答待ちタイマー
-	GetTimeout     time.Duration
-	GetTimeoutLong time.Duration
+	RequestTimeout     time.Duration
+	RequestTimeoutLong time.Duration
 
 	// 計測日時(EDT)の解釈に使うタイムゾーン
 	Location *time.Location
@@ -47,22 +47,22 @@ func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	c := Config{
-		SerialPort:     getEnv("SERIAL_PORT", "/dev/ttyUSB0"),
-		SerialBaud:     getEnvInt("SERIAL_BAUD", 115200),
-		BRouteID:       os.Getenv("BROUTE_ID"),
-		BRoutePass:     os.Getenv("BROUTE_PASS"),
-		EpanCache:      getEnv("EPAN_CACHE", "epan.json"),
-		Output:         getEnv("OUTPUT", "influx"),
-		InfluxURL:      os.Getenv("INFLUX_URL"),
-		InfluxToken:    os.Getenv("INFLUX_TOKEN"),
-		InfluxOrg:      os.Getenv("INFLUX_ORG"),
-		InfluxBucket:   getEnv("INFLUX_BUCKET", "smartmeter"),
-		MeterTag:       getEnv("METER_TAG", "meter01"),
-		PollPower:      getEnvDuration("POLL_POWER", 10*time.Second),
-		PollEnergy:     getEnvDuration("POLL_ENERGY", 60*time.Second),
-		GetTimeout:     getEnvDuration("GET_TIMEOUT", 20*time.Second),
-		GetTimeoutLong: getEnvDuration("GET_TIMEOUT_LONG", 60*time.Second),
-		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		SerialPort:         getEnv("SERIAL_PORT", "/dev/ttyUSB0"),
+		SerialBaud:         getEnvInt("SERIAL_BAUD", 115200),
+		BRouteID:           os.Getenv("BROUTE_ID"),
+		BRoutePass:         os.Getenv("BROUTE_PASS"),
+		EpanCache:          getEnv("EPAN_CACHE", "epan.json"),
+		Output:             getEnv("OUTPUT", "influx"),
+		InfluxURL:          os.Getenv("INFLUX_URL"),
+		InfluxToken:        os.Getenv("INFLUX_TOKEN"),
+		InfluxOrg:          os.Getenv("INFLUX_ORG"),
+		InfluxBucket:       getEnv("INFLUX_BUCKET", "smartmeter"),
+		MeterTag:           getEnv("METER_TAG", "meter01"),
+		PollPower:          getEnvDuration("POLL_POWER", 10*time.Second),
+		PollEnergy:         getEnvDuration("POLL_ENERGY", 60*time.Second),
+		RequestTimeout:     getEnvDuration("REQUEST_TIMEOUT", 20*time.Second),
+		RequestTimeoutLong: getEnvDuration("REQUEST_TIMEOUT_LONG", 60*time.Second),
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
 	}
 
 	loc, err := time.LoadLocation(getEnv("METER_TIMEZONE", "Asia/Tokyo"))

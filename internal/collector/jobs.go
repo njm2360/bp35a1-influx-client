@@ -24,9 +24,6 @@ func (c *Collector) getPartial(ctx context.Context, epcs ...byte) (echonet.Frame
 }
 
 func (c *Collector) pollPower(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
-	defer cancel()
-
 	f, err := c.getPartial(ctx, echonet.EPCInstantPower, echonet.EPCInstantCurrent)
 	if err != nil {
 		return err
@@ -51,9 +48,6 @@ func (c *Collector) pollEnergyMinute(ctx context.Context) error {
 }
 
 func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParams) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
-	defer cancel()
-
 	f, err := c.getPartial(ctx, echonet.EPCCumulativeFwd)
 	if err != nil {
 		return err
@@ -71,9 +65,6 @@ func (c *Collector) pollEnergyTotal(ctx context.Context, params model.MeterParam
 }
 
 func (c *Collector) pollEnergy1Min(ctx context.Context, params model.MeterParams) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
-	defer cancel()
-
 	f, err := c.getPartial(ctx, echonet.EPCCumulative1Min)
 	if err != nil {
 		return err
@@ -90,9 +81,6 @@ func (c *Collector) pollEnergy1Min(ctx context.Context, params model.MeterParams
 }
 
 func (c *Collector) pollStatus(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
-	defer cancel()
-
 	f, err := c.cli.Get(ctx, echonet.EPCFaultStatus)
 	if err != nil {
 		return err
@@ -109,9 +97,6 @@ func (c *Collector) pollStatus(ctx context.Context) error {
 }
 
 func (c *Collector) pollEnergy30(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeout)
-	defer cancel()
-
 	f, err := c.cli.Get(ctx, echonet.EPCScheduledFwd)
 	if err != nil {
 		return err
@@ -124,7 +109,7 @@ func (c *Collector) pollEnergy30(ctx context.Context) error {
 }
 
 func (c *Collector) refreshMeta(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeoutLong)
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.RequestTimeoutLong)
 	defer cancel()
 
 	f, err := c.getPartial(ctx,
@@ -145,7 +130,7 @@ func (c *Collector) refreshMeta(ctx context.Context) error {
 }
 
 func (c *Collector) fetchPropertyMap(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.GetTimeoutLong)
+	ctx, cancel := context.WithTimeout(ctx, c.cfg.RequestTimeoutLong)
 	defer cancel()
 
 	f, err := c.cli.Get(ctx, echonet.EPCGetPropertyMap)

@@ -87,7 +87,7 @@ func TestGetCorrelatesByTID(t *testing.T) {
 			Props: []echonet.Property{{EPC: echonet.EPCInstantPower, EDT: []byte{0, 0, 2, 0}}},
 		}}
 	})
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 
@@ -104,7 +104,7 @@ func TestGetCorrelatesByTID(t *testing.T) {
 
 func TestGetTimeout(t *testing.T) {
 	tr := newFakeTransport(func(echonet.Frame) []echonet.Frame { return nil }) // 応答しない
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 
@@ -130,7 +130,7 @@ func TestSNAReturnsError(t *testing.T) {
 			Props: []echonet.Property{{EPC: echonet.EPCInstantPower}},
 		}}
 	})
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 	gctx, gcancel := context.WithTimeout(ctx, time.Second)
@@ -161,7 +161,7 @@ func TestRequestsSerialized(t *testing.T) {
 			Props: []echonet.Property{{EPC: echonet.EPCInstantPower, EDT: []byte{0, 0, 2, 0}}},
 		}}
 	})
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 
@@ -190,7 +190,7 @@ func TestRequestsSerialized(t *testing.T) {
 
 func TestDeadLinkWatchdog(t *testing.T) {
 	tr := newFakeTransport(func(echonet.Frame) []echonet.Frame { return nil })
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 
 	// 単発の無応答ではタイマ起動のみ。発火しない。
 	c.recordTimeout()
@@ -239,7 +239,7 @@ func TestSetCCorrelates(t *testing.T) {
 			Props: []echonet.Property{{EPC: echonet.EPCHistoryDay1}},
 		}}
 	})
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 
@@ -267,7 +267,7 @@ func TestUnsupportedRequestGetsSNA(t *testing.T) {
 		}
 		return nil
 	})
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 
@@ -304,7 +304,7 @@ func TestINFCSendsResponseAndNotifies(t *testing.T) {
 		}
 		return nil
 	})
-	c := New(tr, testLogger())
+	c := New(tr, testLogger(), 0)
 	ctx := t.Context()
 	go c.Run(ctx)
 

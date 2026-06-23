@@ -33,9 +33,11 @@ type Client struct {
 	wdMu          sync.Mutex
 	firstFailAt   time.Time
 	deadLinkAfter time.Duration
+
+	reqTimeout time.Duration
 }
 
-func New(tr transport.Transport, log *slog.Logger) *Client {
+func New(tr transport.Transport, log *slog.Logger, reqTimeout time.Duration) *Client {
 	return &Client{
 		tr:            tr,
 		log:           log.With("component", "echonet"),
@@ -43,6 +45,7 @@ func New(tr transport.Transport, log *slog.Logger) *Client {
 		pending:       make(map[uint16]chan echonet.Frame),
 		infCh:         make(chan echonet.Frame, infBuffer),
 		deadLinkAfter: defaultDeadLinkAfter,
+		reqTimeout:    reqTimeout,
 	}
 }
 
@@ -63,6 +66,12 @@ func (c *Client) SetC(ctx context.Context, props ...echonet.Property) (echonet.F
 }
 
 func (c *Client) request(ctx context.Context, esv echonet.ESV, props []echonet.Property) (echonet.Frame, error) {
+	if _, ok := ctx.Deadline(); !ok && c.reqTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.reqTimeout)
+		defer cancel()
+	}
+
 	select {
 	case c.reqSem <- struct{}{}:
 		defer func() { <-c.reqSem }()
