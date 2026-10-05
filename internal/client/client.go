@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"main/internal/echonet"
-	"main/internal/transport"
+	"github.com/njm2360/bp35a1-influx-client/internal/echonet"
+	"github.com/njm2360/bp35a1-influx-client/internal/transport"
 )
 
 const infBuffer = 32

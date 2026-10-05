@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"main/internal/echonet"
+	"github.com/njm2360/bp35a1-influx-client/internal/echonet"
 )
 
 // fakeTransport は送信フレームを responder に渡し、その戻りを Recv で返す。

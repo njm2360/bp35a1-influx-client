@@ -9,14 +9,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"main/internal/client"
-	"main/internal/collector"
-	"main/internal/config"
-	"main/internal/storage"
-	"main/internal/storage/influx"
-	"main/internal/storage/stdout"
-	"main/internal/transport"
-	"main/internal/transport/bp35a1"
+	"github.com/njm2360/bp35a1-influx-client/internal/client"
+	"github.com/njm2360/bp35a1-influx-client/internal/collector"
+	"github.com/njm2360/bp35a1-influx-client/internal/config"
+	"github.com/njm2360/bp35a1-influx-client/internal/storage"
+	"github.com/njm2360/bp35a1-influx-client/internal/storage/influx"
+	"github.com/njm2360/bp35a1-influx-client/internal/storage/stdout"
+	"github.com/njm2360/bp35a1-influx-client/internal/transport"
+	"github.com/njm2360/bp35a1-influx-client/internal/transport/bp35a1"
 )
 
 func main() {

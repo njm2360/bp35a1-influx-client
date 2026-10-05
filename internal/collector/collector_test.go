@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"main/internal/config"
-	"main/internal/echonet"
-	"main/internal/model"
+	"github.com/njm2360/bp35a1-influx-client/internal/config"
+	"github.com/njm2360/bp35a1-influx-client/internal/echonet"
+	"github.com/njm2360/bp35a1-influx-client/internal/model"
 )
 
 type fakeELClient struct {
@@ -82,7 +82,7 @@ func testConfig() config.Config {
 	return config.Config{
 		RequestTimeout:     time.Second,
 		RequestTimeoutLong: time.Second,
-		Location:       time.FixedZone("JST", 9*3600),
+		Location:           time.FixedZone("JST", 9*3600),
 	}
 }
 

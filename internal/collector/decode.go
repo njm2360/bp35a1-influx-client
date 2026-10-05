@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"main/internal/echonet"
-	"main/internal/model"
+	"github.com/njm2360/bp35a1-influx-client/internal/echonet"
+	"github.com/njm2360/bp35a1-influx-client/internal/model"
 )
 
 func toPower(f echonet.Frame, now time.Time) (model.Power, error) {

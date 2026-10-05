@@ -12,7 +12,7 @@ import (
 
 	"go.bug.st/serial"
 
-	"main/internal/transport"
+	"github.com/njm2360/bp35a1-influx-client/internal/transport"
 )
 
 const echonetPort = 3610

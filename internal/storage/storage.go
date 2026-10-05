@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 
-	"main/internal/model"
+	"github.com/njm2360/bp35a1-influx-client/internal/model"
 )
 
 type Writer interface {

@@ -9,9 +9,9 @@ import (
 	"os"
 	"sync"
 
-	"main/internal/config"
-	"main/internal/model"
-	"main/internal/storage"
+	"github.com/njm2360/bp35a1-influx-client/internal/config"
+	"github.com/njm2360/bp35a1-influx-client/internal/model"
+	"github.com/njm2360/bp35a1-influx-client/internal/storage"
 )
 
 type Writer struct {

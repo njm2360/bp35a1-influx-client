@@ -1,4 +1,4 @@
-module main
+module github.com/njm2360/bp35a1-influx-client
 
 go 1.26.3
 
